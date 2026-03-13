@@ -9,10 +9,11 @@ venv/
 env/
 .conda/
 
-# PyInstaller
+# PyInstaller build artifacts
 build/
 dist/
 *.spec
+!BoardGamesOnline.spec
 
 # Egg metadata
 *.egg-info/
