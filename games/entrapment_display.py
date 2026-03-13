@@ -164,6 +164,7 @@ class GameClient:
         self._cancel()
         self.cap_choices = []
         self.reloc_src = None
+        self.net_error = ""
         # If the new state has pending capture choices, enter that mode
         if self.pending_capture_choices is not None:
             self.cap_choices = [
@@ -473,6 +474,53 @@ class GameClient:
                 self.mode = "select"
 
 
+# ── History view proxy ──────────────────────────────────────────────────────
+
+
+class _HistoryView:
+    """Lightweight proxy for rendering a past state."""
+
+    def __init__(self, state, game):
+        self.state = state
+        self.phase = state["phase"]
+        self.current_player = state["current_player"]
+        self.action_num = state["action_num"]
+        self.game_over = state["phase"] == "over"
+        self.winner = state["winner"]
+        self.status = state["status"]
+        self.board = state["board"]
+        self.roamers = state["roamers"]
+        self.supply = state["supply"]
+        self.captures = state["captures"]
+        self.log = state["log"]
+        self.pending_capture_choices = state.get("pending_capture_choices")
+        self.selected = None
+        self.valid_dests = []
+        self.mode = "select"
+        self.cap_choices = []
+        self.reloc_src = None
+        self.online = game.online
+        self.my_player = game.my_player
+        self.is_my_turn = False
+        self.opponent_disconnected = False
+        self.net_error = ""
+
+    def iter_all_grooves(self):
+        return _iter_all_grooves(self.state)
+
+    def iter_empty_grooves(self):
+        return _iter_empty_grooves(self.state)
+
+    def iter_player_resting(self, player):
+        return _iter_player_resting(self.state, player)
+
+    def get_forced_roamers(self):
+        return forced_roamers(self.state, self.current_player)
+
+    def get_selectable_action2_move(self):
+        return selectable_for_action2_move(self.state)
+
+
 # ── Rendering ────────────────────────────────────────────────────────────────
 
 class Renderer:
@@ -495,24 +543,37 @@ class Renderer:
 
         self.btn_new = Btn(INFO_X + 100, WIN_H - 50, 130, 34, "New Game", "restart")
 
+        self.flipped = False
         self.hover_sq = None
         self.hover_grv = None
 
     # ── Pixel <-> grid ────────────────────────────────────────────────────
 
-    @staticmethod
-    def sq_xy(r, c):
+    def sq_xy(self, r, c):
+        if self.flipped:
+            return (BOARD_X + (COLS - 1 - c) * CELL,
+                    BOARD_Y + (ROWS - 1 - r) * CELL)
         return (BOARD_X + c * CELL, BOARD_Y + r * CELL)
 
-    @staticmethod
-    def sq_center(r, c):
-        return (BOARD_X + c * CELL + SQ // 2, BOARD_Y + r * CELL + SQ // 2)
+    def sq_center(self, r, c):
+        x, y = self.sq_xy(r, c)
+        return (x + SQ // 2, y + SQ // 2)
 
-    @staticmethod
-    def groove_rect(gt, gr, gc):
+    def groove_rect(self, gt, gr, gc):
+        if self.flipped:
+            if gt == "h":
+                fr, fc = ROWS - 1 - gr, COLS - 2 - gc
+                return pygame.Rect(BOARD_X + fc * CELL + SQ,
+                                   BOARD_Y + fr * CELL, GW, SQ)
+            else:
+                fr, fc = ROWS - 2 - gr, COLS - 1 - gc
+                return pygame.Rect(BOARD_X + fc * CELL,
+                                   BOARD_Y + fr * CELL + SQ, SQ, GW)
         if gt == "h":
-            return pygame.Rect(BOARD_X + gc * CELL + SQ, BOARD_Y + gr * CELL, GW, SQ)
-        return pygame.Rect(BOARD_X + gc * CELL, BOARD_Y + gr * CELL + SQ, SQ, GW)
+            return pygame.Rect(BOARD_X + gc * CELL + SQ,
+                               BOARD_Y + gr * CELL, GW, SQ)
+        return pygame.Rect(BOARD_X + gc * CELL,
+                           BOARD_Y + gr * CELL + SQ, SQ, GW)
 
     def px_to_sq(self, mx, my):
         for r in range(ROWS):
@@ -555,8 +616,14 @@ class Renderer:
         # intersections
         for r in range(ROWS - 1):
             for c in range(COLS - 1):
-                pygame.draw.rect(scr, C_INTERSECT,
-                    (BOARD_X + c * CELL + SQ, BOARD_Y + r * CELL + SQ, GW, GW))
+                ix, iy = self.sq_xy(r, c)
+                # intersection is at bottom-right of cell (r,c) in normal view
+                if self.flipped:
+                    pygame.draw.rect(scr, C_INTERSECT,
+                        (ix - GW, iy - GW, GW, GW))
+                else:
+                    pygame.draw.rect(scr, C_INTERSECT,
+                        (ix + SQ, iy + SQ, GW, GW))
 
         # grooves (highlight on hover when relevant)
         grv_mode = game.mode in ("place", "flip", "reloc_pick", "reloc_place")
@@ -626,14 +693,16 @@ class Renderer:
                     pygame.draw.circle(scr, C_FORCED, (cx, cy), SQ // 2 - 3, 3)
 
         # coordinate labels
-        for c in range(COLS):
-            lbl = self.font_coord.render(COL_LABELS[c], True, C_TEXT_DIM)
-            cx = BOARD_X + c * CELL + SQ // 2 - lbl.get_width() // 2
+        for i in range(COLS):
+            c_idx = (COLS - 1 - i) if self.flipped else i
+            lbl = self.font_coord.render(COL_LABELS[c_idx], True, C_TEXT_DIM)
+            cx = BOARD_X + i * CELL + SQ // 2 - lbl.get_width() // 2
             scr.blit(lbl, (cx, BOARD_Y - 24))
             scr.blit(lbl, (cx, BOARD_Y + BOARD_PX + 10))
-        for r in range(ROWS):
-            lbl = self.font_coord.render(str(r + 1), True, C_TEXT_DIM)
-            ry = BOARD_Y + r * CELL + SQ // 2 - lbl.get_height() // 2
+        for i in range(ROWS):
+            r_idx = (ROWS - i) if self.flipped else (i + 1)
+            lbl = self.font_coord.render(str(r_idx), True, C_TEXT_DIM)
+            ry = BOARD_Y + i * CELL + SQ // 2 - lbl.get_height() // 2
             scr.blit(lbl, (BOARD_X - 24, ry))
             scr.blit(lbl, (BOARD_X + BOARD_PX + 12, ry))
 
@@ -642,8 +711,6 @@ class Renderer:
 
         if game.online:
             self._draw_online_status(scr, game)
-
-        pygame.display.flip()
 
     # ── Roamer rendering ──────────────────────────────────────────────────
 
@@ -925,12 +992,25 @@ def run_online(screen, net, my_player, initial_state):
 
     Does **not** call ``pygame.quit()``.
     """
+    try:
+        from client.shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+    except ImportError:
+        from shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("Entrapment \u2014 Online")
     clock = pygame.time.Clock()
     renderer = Renderer(screen)
     game = GameClient(online=True, my_player=my_player)
     game.load_state(initial_state)
+
+    hist = History()
+    hist.push(initial_state)
+    orient = Orientation()
 
     running = True
     while running:
@@ -939,8 +1019,10 @@ def run_online(screen, net, my_player, initial_state):
             mtype = msg.get("type")
             if mtype == "move_made":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
             elif mtype == "game_over":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
                 game.set_game_over(
                     msg.get("winner"),
                     msg.get("is_draw", False),
@@ -957,13 +1039,14 @@ def run_online(screen, net, my_player, initial_state):
 
         # ── Events ──────────────────────────────────────────────────
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            result = handle_shared_input(event, hist, orient)
+            if result == "quit":
                 running = False
+            elif result in ("handled", "input_blocked"):
+                continue
 
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_q:
-                    running = False
-                elif event.key == pygame.K_ESCAPE:
+                if event.key == pygame.K_ESCAPE:
                     if game.game_over:
                         running = False
                     else:
@@ -1021,7 +1104,14 @@ def run_online(screen, net, my_player, initial_state):
                     net.send_move(move)
 
         # ── Draw ────────────────────────────────────────────────────
-        renderer.draw(game)
+        renderer.flipped = orient.flipped
+        if hist.is_live:
+            display = game
+        else:
+            display = _HistoryView(hist.current(), game)
+        renderer.draw(display)
+        draw_command_panel(screen, hist, game.is_my_turn)
+        pygame.display.flip()
         clock.tick(FPS)
 
 
@@ -1096,8 +1186,11 @@ def main():
             elif ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE:
                     game.cancel()
+                elif ev.key == pygame.K_f:
+                    renderer.flipped = not renderer.flipped
 
         renderer.draw(game)
+        pygame.display.flip()
         clock.tick(FPS)
 
 

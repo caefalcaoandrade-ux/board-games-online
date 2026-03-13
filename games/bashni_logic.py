@@ -1,12 +1,12 @@
 """
 Bashni (Column Draughts) -- Pure game logic (no Pygame, no numpy).
 
-Implements the AbstractBoardGame contract for Bashni, a 12x12 column
+Implements the AbstractBoardGame contract for Bashni, a 10x10 column
 draughts game for two players.
 
 Board representation
 --------------------
-The board is a 12x12 nested list.  Each cell is either ``None`` (empty)
+The board is a 10x10 nested list.  Each cell is either ``None`` (empty)
 or a list of ``[color, rank]`` pairs representing a column (stack of
 pieces).  Index 0 is the bottom piece, index -1 is the top (commander).
 
@@ -35,7 +35,7 @@ except ImportError:
 
 # ── Constants (exported for display module) ──────────────────────────────────
 
-BOARD_N = 12
+BOARD_N = 10
 W, B = "W", "B"
 MAN, KING = "man", "king"
 DIRS = [[-1, -1], [-1, 1], [1, -1], [1, 1]]
@@ -48,7 +48,7 @@ COLOR_TO_PLAYER = {W: 1, B: 2}
 
 
 def in_bounds(r, c):
-    """True if (r, c) is within the 12x12 board."""
+    """True if (r, c) is within the board."""
     return 0 <= r < BOARD_N and 0 <= c < BOARD_N
 
 
@@ -64,19 +64,20 @@ def opponent_color(color):
 
 def promo_row(color):
     """Return the promotion row for the given color."""
-    return 11 if color == W else 0
+    return BOARD_N - 1 if color == W else 0
 
 
 def make_board():
-    """Create and return the initial 12x12 board."""
+    """Create and return the initial board."""
     board = [[None] * BOARD_N for _ in range(BOARD_N)]
+    setup_rows = (BOARD_N - 2) // 2  # 4 for N=10
     for r in range(BOARD_N):
         for c in range(BOARD_N):
             if not is_dark(r, c):
                 continue
-            if r < 5:
+            if r < setup_rows:
                 board[r][c] = [[W, MAN]]
-            elif r > 6:
+            elif r >= BOARD_N - setup_rows:
                 board[r][c] = [[B, MAN]]
     return board
 
@@ -127,11 +128,10 @@ def get_simple_moves(board, r, c, color):
     return moves
 
 
-def _raw_jumps(board, r, c, color, last_dir=None, jumped_set=None):
+def _raw_jumps(board, r, c, color, jumped_set=None):
     """Return raw jump data from (r, c).
 
     Each result is [land_r, land_c, target_r, target_c, dir_r, dir_c].
-    last_dir = [dr, dc] prevents immediate reversal.
     jumped_set = set of (r, c) coordinates already jumped in this sequence.
     """
     col = board[r][c]
@@ -141,8 +141,6 @@ def _raw_jumps(board, r, c, color, last_dir=None, jumped_set=None):
     results = []
     for d in DIRS:
         dr, dc = d[0], d[1]
-        if last_dir and dr == -last_dir[0] and dc == -last_dir[1]:
-            continue
         if is_king:
             dist = 1
             tgt = None
@@ -185,7 +183,7 @@ def _raw_jumps(board, r, c, color, last_dir=None, jumped_set=None):
     return results
 
 
-def _has_raw_jump(board, r, c, color, last_dir=None, jumped_set=None):
+def _has_raw_jump(board, r, c, color, jumped_set=None):
     """True if there is at least one raw jump from (r, c)."""
     col = board[r][c]
     if not col or col[-1][0] != color:
@@ -193,8 +191,6 @@ def _has_raw_jump(board, r, c, color, last_dir=None, jumped_set=None):
     is_king = col[-1][1] == KING
     for d in DIRS:
         dr, dc = d[0], d[1]
-        if last_dir and dr == -last_dir[0] and dc == -last_dir[1]:
-            continue
         if is_king:
             dist = 1
             tgt = None
@@ -269,16 +265,17 @@ def _sim_jump(board, fr, fc, lr, lc, tr, tc, color):
     return b
 
 
-def get_jumps(board, r, c, color, last_dir=None, jumped_set=None):
+def get_jumps(board, r, c, color, jumped_set=None):
     """Return filtered jump list from (r, c).
 
     For kings, if a landing square allows further capture, prefer it over
     those that don't (per the same captured-piece / direction group).
+    This implements §8.5 (King Landing Constraint).
 
     Each result is [land_r, land_c, target_r, target_c, dir_r, dir_c].
     jumped_set = set of (r, c) coordinates already jumped in this sequence.
     """
-    raw = _raw_jumps(board, r, c, color, last_dir, jumped_set)
+    raw = _raw_jumps(board, r, c, color, jumped_set)
     if not raw:
         return []
     col = board[r][c]
@@ -302,7 +299,7 @@ def get_jumps(board, r, c, color, last_dir=None, jumped_set=None):
             lr, lc, tr, tc, dr, dc = item
             sim = _sim_jump(board, r, c, lr, lc, tr, tc, color)
             new_jumped = (jumped_set or set()) | {(tr, tc)}
-            if _has_raw_jump(sim, lr, lc, color, [dr, dc], new_jumped):
+            if _has_raw_jump(sim, lr, lc, color, new_jumped):
                 continuing.append(item)
             else:
                 non_continuing.append(item)
@@ -339,7 +336,7 @@ def has_legal_move(board, color):
 # ── Full move enumeration ────────────────────────────────────────────────────
 
 
-def _enumerate_capture_sequences(board, r, c, color, last_dir=None, jumped_set=None):
+def _enumerate_capture_sequences(board, r, c, color, jumped_set=None):
     """Recursively enumerate all complete capture sequences from (r, c).
 
     Returns a list of sequences, where each sequence is a list of
@@ -348,7 +345,7 @@ def _enumerate_capture_sequences(board, r, c, color, last_dir=None, jumped_set=N
     """
     if jumped_set is None:
         jumped_set = set()
-    jumps = get_jumps(board, r, c, color, last_dir, jumped_set)
+    jumps = get_jumps(board, r, c, color, jumped_set)
     if not jumps:
         return []
 
@@ -358,8 +355,7 @@ def _enumerate_capture_sequences(board, r, c, color, last_dir=None, jumped_set=N
         new_board = _sim_jump(board, r, c, lr, lc, tr, tc, color)
         new_jumped = jumped_set | {(tr, tc)}
         further = _enumerate_capture_sequences(
-            new_board, lr, lc, color, last_dir=[dr, dc],
-            jumped_set=new_jumped
+            new_board, lr, lc, color, jumped_set=new_jumped
         )
         if further:
             for seq in further:
@@ -413,13 +409,11 @@ def _apply_full_move(board, color, move):
     if "jumps" in move:
         # Capture sequence
         cur_r, cur_c = fr, fc
-        prev_dir = None
         jumped_coords = set()
         for landing in move["jumps"]:
             lr, lc = landing[0], landing[1]
             # Find the target and direction for this jump
-            jumps = get_jumps(new_board, cur_r, cur_c, color, prev_dir,
-                              jumped_coords)
+            jumps = get_jumps(new_board, cur_r, cur_c, color, jumped_coords)
             target_found = False
             for item in jumps:
                 if item[0] == lr and item[1] == lc:
@@ -428,7 +422,6 @@ def _apply_full_move(board, color, move):
                         new_board, cur_r, cur_c, lr, lc,
                         item[2], item[3], color
                     )
-                    prev_dir = [item[4], item[5]]
                     target_found = True
                     break
             if not target_found:
@@ -454,7 +447,7 @@ class BashniLogic(AbstractBoardGame):
     State dict::
 
         {
-            "board":         [[cell, ...], ...],  # 12x12, cell = None or [[color, rank], ...]
+            "board":         [[cell, ...], ...],  # 10x10, cell = None or [[color, rank], ...]
             "turn":          str,                  # "W" or "B"
             "quiet_half":    int,                  # half-moves without man move or capture
             "pos_history":   {"key": count, ...},  # position repetition tracker
@@ -557,12 +550,13 @@ class BashniLogic(AbstractBoardGame):
         return get_simple_moves(board, r, c, color)
 
     @staticmethod
-    def get_jumps_for(board, r, c, color, last_dir=None):
+    def get_jumps_for(board, r, c, color, jumped_set=None):
         """Return filtered jumps from (r, c).
 
         Each result is [land_r, land_c, target_r, target_c, dir_r, dir_c].
+        jumped_set = set of (r, c) coordinates already jumped in this sequence.
         """
-        return get_jumps(board, r, c, color, last_dir)
+        return get_jumps(board, r, c, color, jumped_set)
 
     @staticmethod
     def any_capture_for(board, color):

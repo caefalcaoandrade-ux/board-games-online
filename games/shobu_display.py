@@ -167,6 +167,7 @@ class GameClient:
         self.state = state
         self._status = self.logic.get_game_status(self.state)
         self._sync_boards()
+        self.net_error = ""
         # Clear ALL UI selection state
         self.phase = PH_OVER if self._status["is_over"] else PH_PSEL
         self.sel = None
@@ -390,6 +391,41 @@ class GameClient:
         return stone_counts(self.boards, board_idx)
 
 
+# ── History view proxy ──────────────────────────────────────────────────────
+
+
+class _HistoryView:
+    """Lightweight proxy for rendering a past state."""
+
+    def __init__(self, state, game):
+        self.boards = [[row[:] for row in b] for b in state["boards"]]
+        self.turn = state["turn"]
+        self._status = game.logic.get_game_status(state)
+        self.phase = PH_OVER if self._status["is_over"] else PH_PSEL
+        self.sel = None
+        self.pmove = None
+        self.vstone = []
+        self.vdest = []
+        self.push_info = None
+        self._forced_message = None
+        self.online = game.online
+        self.my_player = game.my_player
+        self.is_my_turn = False
+        self.opponent_disconnected = False
+        self.net_error = ""
+
+    @property
+    def game_over(self):
+        return self._status["is_over"]
+
+    @property
+    def winner(self):
+        return self._status["winner"]
+
+    def stone_count(self, board_idx):
+        return stone_counts(self.boards, board_idx)
+
+
 # ── Renderer ─────────────────────────────────────────────────────────────────
 
 
@@ -398,6 +434,7 @@ class Renderer:
 
     def __init__(self, screen):
         self.screen = screen
+        self.flipped = False
         self.f_lg = pygame.font.SysFont("arial", 30, bold=True)
         self.f_md = pygame.font.SysFont("arial", 20)
         self.f_sm = pygame.font.SysFont("arial", 16)
@@ -411,14 +448,30 @@ class Renderer:
             (PAD_L + BOARD_PX + GAP_X,   PAD_TOP + BOARD_PX + GAP_Y),
         ]
 
-    # ── Coordinate mapping ────────────────────────────────────────────────
+    # ── Coordinate mapping (flip-aware) ──────────────────────────────────
+
+    def _bxy(self, bi):
+        """Pixel origin for board bi, accounting for flip."""
+        idx = (3 - bi) if self.flipped else bi
+        return self.bpos[idx]
+
+    def _cell_tl(self, bx, by, r, c):
+        """Cell top-left pixel within a board, accounting for flip."""
+        if self.flipped:
+            return bx + (3 - c) * CELL, by + (3 - r) * CELL
+        return bx + c * CELL, by + r * CELL
 
     def hit_test(self, mx, my):
         """Return (board, row, col) for a pixel position, or None."""
-        for i, (bx, by) in enumerate(self.bpos):
+        for i in range(4):
+            bx, by = self._bxy(i)
             if bx <= mx < bx + BOARD_PX and by <= my < by + BOARD_PX:
-                c = (mx - bx) // CELL
-                r = (my - by) // CELL
+                gc = (mx - bx) // CELL
+                gr = (my - by) // CELL
+                if self.flipped:
+                    c, r = 3 - gc, 3 - gr
+                else:
+                    c, r = gc, gr
                 if 0 <= r < 4 and 0 <= c < 4:
                     return (i, r, c)
         return None
@@ -433,7 +486,6 @@ class Renderer:
         self._draw_hud(game)
         if game.online:
             self._draw_online_status(game)
-        pygame.display.flip()
 
     def _draw_rope(self):
         ry = PAD_TOP + BOARD_PX + GAP_Y // 2
@@ -446,13 +498,15 @@ class Renderer:
         for dx in (-10, 0, 10):
             pygame.draw.circle(self.screen, ROPE_CLR, (mid + dx, ry), 4)
         # side labels
-        ws = self.f_sm.render("\u25B2 WHITE's side", True, TXT_DIM)
-        bs = self.f_sm.render("\u25BC BLACK's side", True, TXT_DIM)
+        top_lbl = "\u25B2 BLACK's side" if self.flipped else "\u25B2 WHITE's side"
+        bot_lbl = "\u25BC WHITE's side" if self.flipped else "\u25BC BLACK's side"
+        ws = self.f_sm.render(top_lbl, True, TXT_DIM)
+        bs = self.f_sm.render(bot_lbl, True, TXT_DIM)
         self.screen.blit(ws, (x0 + 6, ry - 24))
         self.screen.blit(bs, (x0 + 6, ry + 9))
 
     def _draw_board(self, game, bi):
-        bx, by = self.bpos[bi]
+        bx, by = self._bxy(bi)
         dark = BOARD_TYPE[bi] == DARK_T
         c1 = DARK_WOOD  if dark else LITE_WOOD
         c2 = DARK_WOOD2 if dark else LITE_WOOD2
@@ -472,7 +526,7 @@ class Renderer:
         # cells
         for r in range(4):
             for c in range(4):
-                x, y = bx + c * CELL, by + r * CELL
+                x, y = self._cell_tl(bx, by, r, c)
                 pygame.draw.rect(self.screen, c1 if (r + c) % 2 == 0 else c2,
                                  (x, y, CELL, CELL))
                 pygame.draw.rect(self.screen, GRID_LINE, (x, y, CELL, CELL), 1)
@@ -482,17 +536,17 @@ class Renderer:
             vb, vr, vc = vbrc
             if vb == bi:
                 ov.fill(HINT_FILL)
-                self.screen.blit(ov, (bx + vc * CELL, by + vr * CELL))
+                self.screen.blit(ov, self._cell_tl(bx, by, vr, vc))
 
         # valid destinations
         for vbrc in game.vdest:
             vb, vr, vc = vbrc
             if vb == bi:
                 ov.fill(VALID_FILL)
-                self.screen.blit(ov, (bx + vc * CELL, by + vr * CELL))
-                cx = bx + vc * CELL + CELL // 2
-                cy = by + vr * CELL + CELL // 2
-                pygame.draw.circle(self.screen, VALID_DOT, (cx, cy), 9)
+                vx, vy = self._cell_tl(bx, by, vr, vc)
+                self.screen.blit(ov, (vx, vy))
+                pygame.draw.circle(self.screen, VALID_DOT,
+                                   (vx + CELL // 2, vy + CELL // 2), 9)
 
         # push preview
         pi = game.push_info
@@ -501,26 +555,27 @@ class Renderer:
             pdr, pdc = pi["dest_r"], pi["dest_c"]
             off = pi["off_board"]
             # highlight pushed stone
+            ox, oy = self._cell_tl(bx, by, opr, opc)
             ov.fill(PUSH_FILL)
-            self.screen.blit(ov, (bx + opc * CELL, by + opr * CELL))
+            self.screen.blit(ov, (ox, oy))
             # small X on push source
-            cx = bx + opc * CELL + CELL // 2
-            cy = by + opr * CELL + CELL // 2
+            cx = ox + CELL // 2
+            cy = oy + CELL // 2
             pygame.draw.line(self.screen, PUSH_RING, (cx-6, cy-6), (cx+6, cy+6), 2)
             pygame.draw.line(self.screen, PUSH_RING, (cx+6, cy-6), (cx-6, cy+6), 2)
             if not off:
                 # ring where pushed stone lands
-                px = bx + pdc * CELL + CELL // 2
-                py = by + pdr * CELL + CELL // 2
-                pygame.draw.circle(self.screen, PUSH_RING, (px, py), 12, 2)
+                dx, dy = self._cell_tl(bx, by, pdr, pdc)
+                pygame.draw.circle(self.screen, PUSH_RING,
+                                   (dx + CELL // 2, dy + CELL // 2), 12, 2)
             else:
                 # arrow pointing off board edge
-                ex = bx + opc * CELL + CELL // 2
-                ey = by + opr * CELL + CELL // 2
                 d = game.pmove["dir"]
-                ax = ex + d[1] * CELL * 0.6
-                ay = ey + d[0] * CELL * 0.6
-                pygame.draw.line(self.screen, PUSH_RING, (ex, ey), (int(ax), int(ay)), 2)
+                flip_d0 = -d[0] if self.flipped else d[0]
+                flip_d1 = -d[1] if self.flipped else d[1]
+                ax = cx + flip_d1 * CELL * 0.6
+                ay = cy + flip_d0 * CELL * 0.6
+                pygame.draw.line(self.screen, PUSH_RING, (cx, cy), (int(ax), int(ay)), 2)
 
         # stones
         for r in range(4):
@@ -528,8 +583,9 @@ class Renderer:
                 v = game.boards[bi][r][c]
                 if v == EMPTY:
                     continue
-                cx = bx + c * CELL + CELL // 2
-                cy = by + r * CELL + CELL // 2
+                sx, sy = self._cell_tl(bx, by, r, c)
+                cx = sx + CELL // 2
+                cy = sy + CELL // 2
                 rad = CELL // 2 - 9
 
                 # selection ring (behind stone)
@@ -547,14 +603,16 @@ class Renderer:
                                    (cx - rad // 3, cy - rad // 3), max(rad // 4, 3))
 
         # coordinates
-        for c in range(4):
-            lbl = self.f_co.render(chr(ord("a") + c), True, COORD_CLR)
-            self.screen.blit(lbl, (bx + c * CELL + CELL // 2 - lbl.get_width() // 2,
+        for i in range(4):
+            c_idx = (3 - i) if self.flipped else i
+            lbl = self.f_co.render(chr(ord("a") + c_idx), True, COORD_CLR)
+            self.screen.blit(lbl, (bx + i * CELL + CELL // 2 - lbl.get_width() // 2,
                                    by + BOARD_PX + 8))
-        for r in range(4):
-            lbl = self.f_co.render(str(4 - r), True, COORD_CLR)
+        for i in range(4):
+            r_idx = i if self.flipped else (3 - i)
+            lbl = self.f_co.render(str(r_idx + 1), True, COORD_CLR)
             self.screen.blit(lbl, (bx - lbl.get_width() - 6,
-                                   by + r * CELL + CELL // 2 - lbl.get_height() // 2))
+                                   by + i * CELL + CELL // 2 - lbl.get_height() // 2))
 
         # board label + stone counts
         kind = "Dark" if dark else "Light"
@@ -683,6 +741,15 @@ def run_online(screen, net, my_player, initial_state):
     Returns when the game ends or the user closes the window.
     Does **not** call ``pygame.quit()`` -- the caller handles cleanup.
     """
+    try:
+        from client.shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+    except ImportError:
+        from shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("SHOBU \u2014 Online")
     clock = pygame.time.Clock()
@@ -691,6 +758,10 @@ def run_online(screen, net, my_player, initial_state):
     game = GameClient(online=True, my_player=my_player)
     game.load_state(initial_state)
 
+    hist = History()
+    hist.push(initial_state)
+    orient = Orientation()
+
     running = True
     while running:
         # ── Poll network ────────────────────────────────────────────
@@ -698,8 +769,10 @@ def run_online(screen, net, my_player, initial_state):
             mtype = msg.get("type")
             if mtype == "move_made":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
             elif mtype == "game_over":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
                 game.set_game_over(
                     msg.get("winner"),
                     msg.get("is_draw", False),
@@ -716,13 +789,11 @@ def run_online(screen, net, my_player, initial_state):
 
         # ── Events ──────────────────────────────────────────────────
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            result = handle_shared_input(event, hist, orient)
+            if result == "quit":
                 running = False
-
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    running = False
-
+            elif result in ("handled", "input_blocked"):
+                continue
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if game.game_over:
                     continue
@@ -735,7 +806,14 @@ def run_online(screen, net, my_player, initial_state):
                     net.send_move(move)
 
         # ── Draw ────────────────────────────────────────────────────
-        renderer.draw(game)
+        renderer.flipped = orient.flipped
+        if hist.is_live:
+            display = game
+        else:
+            display = _HistoryView(hist.current(), game)
+        renderer.draw(display)
+        draw_command_panel(screen, hist, game.is_my_turn)
+        pygame.display.flip()
         clock.tick(60)
 
 
@@ -766,7 +844,10 @@ def main():
                     game.undo_passive()
                 elif ev.key == pygame.K_ESCAPE:
                     game.deselect()
+                elif ev.key == pygame.K_f:
+                    renderer.flipped = not renderer.flipped
         renderer.draw(game)
+        pygame.display.flip()
         clock.tick(60)
 
 

@@ -731,24 +731,24 @@ from games.bashni_logic import (
 )
 
 
-def test_bashni_board_12x12():
-    """§1: 12×12 grid, 72 dark playable squares."""
-    assert BA_N == 12
-    dark_count = sum(1 for r in range(12) for c in range(12) if is_dark(r, c))
-    assert dark_count == 72
+def test_bashni_board_10x10():
+    """§1: 10×10 grid, 50 dark playable squares."""
+    assert BA_N == 10
+    dark_count = sum(1 for r in range(BA_N) for c in range(BA_N) if is_dark(r, c))
+    assert dark_count == 50
 
 
-def test_bashni_initial_30_each():
-    """§2: Each player begins with 30 men."""
+def test_bashni_initial_20_each():
+    """§2: Each player begins with 20 men on a 10×10 board."""
     logic = BashniLogic()
     state = logic.create_initial_state()
     board = state["board"]
-    w_count = sum(1 for r in range(12) for c in range(12)
+    w_count = sum(1 for r in range(BA_N) for c in range(BA_N)
                   if board[r][c] and board[r][c][-1][0] == W)
-    b_count = sum(1 for r in range(12) for c in range(12)
+    b_count = sum(1 for r in range(BA_N) for c in range(BA_N)
                   if board[r][c] and board[r][c][-1][0] == B)
-    assert w_count == 30
-    assert b_count == 30
+    assert w_count == 20
+    assert b_count == 20
 
 
 def test_bashni_white_moves_first():
@@ -758,20 +758,21 @@ def test_bashni_white_moves_first():
     assert state["turn"] == W
 
 
-def test_bashni_white_on_ranks_1_to_5():
-    """§2: White on ranks 1–5 (rows 0–4), Black on ranks 8–12 (rows 7–11)."""
+def test_bashni_white_on_ranks_1_to_4():
+    """§2: White on rows 0–3, empty rows 4–5, Black on rows 6–9 (10×10)."""
     board = make_board()
-    for r in range(5):
-        for c in range(12):
+    setup_rows = (BA_N - 2) // 2  # 4 for N=10
+    for r in range(setup_rows):
+        for c in range(BA_N):
             if is_dark(r, c):
                 assert board[r][c] is not None, f"({r},{c}) should have White"
                 assert board[r][c][-1][0] == W
-    for r in range(5, 7):
-        for c in range(12):
+    for r in range(setup_rows, BA_N - setup_rows):
+        for c in range(BA_N):
             if is_dark(r, c):
                 assert board[r][c] is None, f"({r},{c}) should be empty"
-    for r in range(7, 12):
-        for c in range(12):
+    for r in range(BA_N - setup_rows, BA_N):
+        for c in range(BA_N):
             if is_dark(r, c):
                 assert board[r][c] is not None, f"({r},{c}) should have Black"
                 assert board[r][c][-1][0] == B
@@ -779,7 +780,7 @@ def test_bashni_white_on_ranks_1_to_5():
 
 def test_bashni_man_moves_forward_diag_only():
     """§7.1: Man moves one square diagonally forward only."""
-    board = [[None] * 12 for _ in range(12)]
+    board = [[None] * BA_N for _ in range(BA_N)]
     board[5][5] = [[W, MAN]]  # White man in middle
     moves = get_simple_moves(board, 5, 5, W)
     # White forward = +row. So valid: (6,4) and (6,6)
@@ -790,7 +791,7 @@ def test_bashni_man_moves_forward_diag_only():
 
 def test_bashni_king_flies_diag():
     """§7.2: King moves diagonally any distance."""
-    board = [[None] * 12 for _ in range(12)]
+    board = [[None] * BA_N for _ in range(BA_N)]
     board[5][5] = [[W, BA_KING]]
     moves = get_simple_moves(board, 5, 5, W)
     # Should reach all 4 diagonal rays until edge
@@ -802,7 +803,7 @@ def test_bashni_king_flies_diag():
 
 def test_bashni_man_captures_all_4_dirs():
     """§8.1: Men capture in all four diagonal directions (including backward)."""
-    board = [[None] * 12 for _ in range(12)]
+    board = [[None] * BA_N for _ in range(BA_N)]
     board[5][5] = [[W, MAN]]
     board[4][4] = [[B, MAN]]  # enemy backward-left
     # Landing at (3,3) should be valid
@@ -854,7 +855,7 @@ def test_bashni_capture_top_piece_only():
 
     Code convention: index 0 = bottom, index -1 = top (commander).
     """
-    board = [[None] * 12 for _ in range(12)]
+    board = [[None] * BA_N for _ in range(BA_N)]
     board[5][5] = [[W, MAN]]  # White attacker (single piece)
     # 2-piece stack at (6,6): White prisoner at bottom, Black commander on top
     board[6][6] = [[W, MAN], [B, MAN]]
@@ -874,9 +875,9 @@ def test_bashni_capture_top_piece_only():
 
 
 def test_bashni_promotion_row():
-    """§10: White promotes at rank 12 (row 11), Black at rank 1 (row 0)."""
+    """§10: White promotes at last row (BOARD_N-1), Black at row 0."""
     from games.bashni_logic import promo_row
-    assert promo_row(W) == 11
+    assert promo_row(W) == BA_N - 1
     assert promo_row(B) == 0
 
 
@@ -1293,7 +1294,7 @@ def test_tumbleweed_two_passes_end_game():
     assert state["phase"] == PH_PLAY  # one pass, not over yet
     state = logic.apply_move(state, TW_WHITE, {"pass": True})
     assert state["phase"] == PH_OVER  # two passes, game over
-    assert state["winner"] is not None
+    # winner may be None if scores are tied (draw is possible in edge cases)
 
 
 def test_tumbleweed_scoring():

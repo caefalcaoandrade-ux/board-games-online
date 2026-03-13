@@ -287,10 +287,19 @@ class TumbleweedLogic(AbstractBoardGame):
 
         elif phase == PH_PIE:
             # The pie rule: guest decides to swap or not.
+            if move.get("swap"):
+                # Swap the colours of the two seed stacks.
+                for ck, sv in new["stacks"].items():
+                    if sv[0] == RED:
+                        sv[0] = WHITE
+                    elif sv[0] == WHITE:
+                        sv[0] = RED
+                new["msg"] = "Colours swapped! Red's turn"
+            else:
+                new["msg"] = "Red's turn"
             # In either case, Red moves first in the play phase.
             new["phase"] = PH_PLAY
             new["turn"] = RED
-            new["msg"] = "Red's turn"
 
         elif phase == PH_PLAY:
             if "pass" in move and move["pass"]:
@@ -307,10 +316,14 @@ class TumbleweedLogic(AbstractBoardGame):
                     new["ctrl_map"] = ctrl_map
                     sr = scores[str(RED)][2]
                     sw = scores[str(WHITE)][2]
-                    winner = RED if sr > sw else WHITE
-                    new["winner"] = winner
-                    wn = COLOUR_NAME[winner]
-                    new["msg"] = f"Game over -- {wn} wins!   Red {sr}  ·  White {sw}"
+                    if sr == sw:
+                        new["winner"] = None
+                        new["msg"] = f"Game over -- Draw!   Red {sr}  ·  White {sw}"
+                    else:
+                        winner = RED if sr > sw else WHITE
+                        new["winner"] = winner
+                        wn = COLOUR_NAME[winner]
+                        new["msg"] = f"Game over -- {wn} wins!   Red {sr}  ·  White {sw}"
                 else:
                     passer_name = COLOUR_NAME[passer]
                     turn_name = COLOUR_NAME[new["turn"]]

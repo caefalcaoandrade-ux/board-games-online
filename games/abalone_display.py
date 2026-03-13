@@ -225,6 +225,7 @@ class GameClient:
         self.selected = []
         self.msg = ""
         self.msg_timer = 0
+        self.net_error = ""
 
     def set_game_over(self, winner, is_draw, reason=""):
         """Force game-over state from a server message (e.g. forfeit)."""
@@ -359,6 +360,40 @@ class GameClient:
             self.game_over, self.winner, self.selected)
 
 
+# ── History view proxy ──────────────────────────────────────────────────────
+
+
+class _HistoryView:
+    """Lightweight proxy for rendering a past state."""
+
+    def __init__(self, state, game):
+        self.board = state["board"]
+        self.turn = state["turn"]
+        self.captured = state["captured"]
+        self._status = game.logic.get_game_status(state)
+        self._game_over_msg = None
+        self.selected = []
+        self.msg = ""
+        self.msg_timer = 0
+        self.msg_color = C_MSG_ERR
+        self.online = game.online
+        self.my_player = game.my_player
+        self.is_my_turn = False
+        self.opponent_disconnected = False
+        self.net_error = ""
+
+    @property
+    def game_over(self):
+        return self._status["is_over"]
+
+    @property
+    def winner(self):
+        return self._status["winner"]
+
+    def get_targets(self):
+        return {}
+
+
 # ── Renderer ─────────────────────────────────────────────────────────────────
 
 class Renderer:
@@ -366,6 +401,7 @@ class Renderer:
 
     def __init__(self, screen):
         self.screen = screen
+        self.flipped = False
 
         # Pre-render marble surfaces
         self.marble_surf = {
@@ -385,6 +421,19 @@ class Renderer:
         self.f_coord = pygame.font.SysFont("Consolas", 12)
         self.f_lbl   = pygame.font.SysFont("Arial", 16, bold=True)
 
+    def _flip_px(self, px, py):
+        """Flip a pixel position 180° around the board center."""
+        if self.flipped:
+            return (2 * BOARD_CX - px, 2 * BOARD_CY - py)
+        return (px, py)
+
+    def hit_cell(self, mx, my):
+        """Find which cell was clicked, accounting for flip. Returns [q,r,s] or None."""
+        if self.flipped:
+            mx = 2 * BOARD_CX - mx
+            my = 2 * BOARD_CY - my
+        return GameClient.hit(mx, my)
+
     def draw(self, game):
         """Draw the full scene given a GameClient instance."""
         scr = self.screen
@@ -395,7 +444,6 @@ class Renderer:
         self._draw_hud(game)
         if game.online:
             self._draw_online_status(game)
-        pygame.display.flip()
 
     # ── Board background ─────────────────────────────────────────────────
 
@@ -415,7 +463,8 @@ class Renderer:
         board = game.board
         selected_keys = set(cube_key(s[0], s[1], s[2]) for s in game.selected)
 
-        for k, (px, py) in pix.items():
+        for k, raw_pos in pix.items():
+            px, py = self._flip_px(*raw_pos)
             ipx, ipy = int(px), int(py)
             val = board[k]
 
@@ -459,7 +508,7 @@ class Renderer:
         for r in range(9):
             cube = rc_to_cube(r, 0)
             k = cube_key(cube[0], cube[1], cube[2])
-            px, py = pix[k]
+            px, py = self._flip_px(*pix[k])
             lbl = self.f_lbl.render(f"R{r+1}", True, C_LABEL)
             self.screen.blit(lbl, (int(px) - CELL_R - 38,
                                    int(py) - lbl.get_height() // 2))
@@ -467,7 +516,7 @@ class Renderer:
         for c in range(ROW_LENS[8]):
             cube = rc_to_cube(8, c)
             k = cube_key(cube[0], cube[1], cube[2])
-            px, py = pix[k]
+            px, py = self._flip_px(*pix[k])
             lbl = self.f_coord.render(f"C{c+1}", True, C_LABEL)
             self.screen.blit(lbl, (int(px) - lbl.get_width() // 2,
                                    int(py) + CELL_R + 10))
@@ -475,7 +524,7 @@ class Renderer:
         for c in range(ROW_LENS[0]):
             cube = rc_to_cube(0, c)
             k = cube_key(cube[0], cube[1], cube[2])
-            px, py = pix[k]
+            px, py = self._flip_px(*pix[k])
             lbl = self.f_coord.render(f"C{c+1}", True, C_LABEL)
             self.screen.blit(lbl, (int(px) - lbl.get_width() // 2,
                                    int(py) - CELL_R - 18))
@@ -633,6 +682,15 @@ def run_online(screen, net, my_player, initial_state):
     Returns when the game ends or the user closes the window.
     Does **not** call ``pygame.quit()`` -- the caller handles cleanup.
     """
+    try:
+        from client.shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+    except ImportError:
+        from shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+
     screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
     pygame.display.set_caption("Abalone \u2014 Online")
     clock = pygame.time.Clock()
@@ -641,6 +699,10 @@ def run_online(screen, net, my_player, initial_state):
     game = GameClient(online=True, my_player=my_player)
     game.load_state(initial_state)
 
+    hist = History()
+    hist.push(initial_state)
+    orient = Orientation()
+
     running = True
     while running:
         # ── Poll network ────────────────────────────────────────────
@@ -648,8 +710,10 @@ def run_online(screen, net, my_player, initial_state):
             mtype = msg.get("type")
             if mtype == "move_made":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
             elif mtype == "game_over":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
                 game.set_game_over(
                     msg.get("winner"),
                     msg.get("is_draw", False),
@@ -666,25 +730,36 @@ def run_online(screen, net, my_player, initial_state):
 
         # ── Events ──────────────────────────────────────────────────
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            result = handle_shared_input(event, hist, orient)
+            if result == "quit":
                 running = False
-
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    running = False
+            elif result in ("handled", "input_blocked"):
+                continue
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     if game.game_over:
                         continue
-                    move = game.on_left_click(*event.pos)
+                    # Flip click coords before hit detection
+                    mx, my = event.pos
+                    if orient.flipped:
+                        mx = 2 * BOARD_CX - mx
+                        my = 2 * BOARD_CY - my
+                    move = game.on_left_click(mx, my)
                     if move is not None:
                         net.send_move(move)
                 elif event.button == 3:
                     game.selected = []
 
         # ── Draw ────────────────────────────────────────────────────
-        renderer.draw(game)
+        renderer.flipped = orient.flipped
+        if hist.is_live:
+            display = game
+        else:
+            display = _HistoryView(hist.current(), game)
+        renderer.draw(display)
+        draw_command_panel(screen, hist, game.is_my_turn)
+        pygame.display.flip()
         clock.tick(FPS)
 
 
@@ -705,7 +780,11 @@ def main():
                 running = False
             elif ev.type == pygame.MOUSEBUTTONDOWN:
                 if ev.button == 1:
-                    game.on_left_click(*ev.pos)
+                    mx, my = ev.pos
+                    if renderer.flipped:
+                        mx = 2 * BOARD_CX - mx
+                        my = 2 * BOARD_CY - my
+                    game.on_left_click(mx, my)
                 elif ev.button == 3:
                     game.selected = []
             elif ev.type == pygame.KEYDOWN:
@@ -717,10 +796,13 @@ def main():
                         game._flash("Move undone", C_MSG_OK)
                     else:
                         game._flash("Nothing to undo", C_MSG_ERR)
+                elif ev.key == pygame.K_f:
+                    renderer.flipped = not renderer.flipped
                 elif ev.key == pygame.K_ESCAPE:
                     running = False
 
         renderer.draw(game)
+        pygame.display.flip()
         clock.tick(FPS)
 
     pygame.quit()

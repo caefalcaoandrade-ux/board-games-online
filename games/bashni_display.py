@@ -69,7 +69,7 @@ C_PANEL_BG    = (42, 38, 34)
 C_PANEL_BD    = (70, 65, 58)
 C_SHADOW      = (22, 20, 18)
 
-COL_LABELS = "abcdefghijkl"
+COL_LABELS = "abcdefghij"
 
 # Disc geometry
 DISC_RX = int(SQ * 0.38)
@@ -80,14 +80,26 @@ DISC_STEP_MIN = 2
 # ── Coordinate conversion ───────────────────────────────────────────────────
 
 
-def board_to_px(r, c):
+def board_to_px(r, c, flipped=False):
     """Board (row, col) -> pixel top-left. Row 0 at bottom of screen."""
+    if flipped:
+        return MARGIN + (BOARD_N - 1 - c) * SQ, MARGIN + r * SQ
     return MARGIN + c * SQ, MARGIN + (BOARD_N - 1 - r) * SQ
 
 
-def px_to_board(mx, my):
-    c = (mx - MARGIN) // SQ
-    r = (BOARD_N - 1) - (my - MARGIN) // SQ
+def px_to_board(mx, my, flipped=False):
+    bx = mx - MARGIN
+    by = my - MARGIN
+    if bx < 0 or by < 0 or bx >= BOARD_PX or by >= BOARD_PX:
+        return None
+    gc = bx // SQ
+    gr = by // SQ
+    if flipped:
+        c = BOARD_N - 1 - gc
+        r = gr
+    else:
+        c = gc
+        r = (BOARD_N - 1) - gr
     if 0 <= r < BOARD_N and 0 <= c < BOARD_N:
         return r, c
     return None
@@ -232,7 +244,6 @@ class GameClient:
         self.valid_dests = []
         self.is_capture_mode = False
         self.jumping = None
-        self.jump_dir = None
         self.game_over = False
         self.winner = None
         self.status = "White's turn"
@@ -243,6 +254,7 @@ class GameClient:
         # Track the in-progress capture sequence for committing a full move
         self._capture_from = None
         self._capture_landings = []
+        self._jumped_coords = set()
 
     @property
     def turn(self):
@@ -266,9 +278,10 @@ class GameClient:
         self.valid_dests = []
         self.is_capture_mode = False
         self.jumping = None
-        self.jump_dir = None
         self._capture_from = None
         self._capture_landings = []
+        self._jumped_coords = set()
+        self.net_error = ""
         lf = self.state["last_from"]
         lt = self.state["last_to"]
         self.last_from = tuple(lf) if lf else None
@@ -315,11 +328,11 @@ class GameClient:
         self.valid_dests = []
         self.is_capture_mode = False
         self.jumping = None
-        self.jump_dir = None
         self.game_over = False
         self.winner = None
         self._capture_from = None
         self._capture_landings = []
+        self._jumped_coords = set()
         lf = self.state["last_from"]
         lt = self.state["last_to"]
         self.last_from = tuple(lf) if lf else None
@@ -402,14 +415,15 @@ class GameClient:
                     self._save_undo()
                 self._capture_from = [sr, sc]
                 self._capture_landings = []
+                self._jumped_coords = set()
+            self._jumped_coords.add((tr, tc))
             BashniLogic.exec_jump(self.board, sr, sc, lr, lc, tr, tc, self.turn)
             self._capture_landings.append([lr, lc])
             self.last_from = (sr, sc)
             self.last_to = (lr, lc)
-            further = BashniLogic.get_jumps_for(self.board, lr, lc, self.turn, last_dir=[dr, dc])
+            further = BashniLogic.get_jumps_for(self.board, lr, lc, self.turn, jumped_set=self._jumped_coords)
             if further:
                 self.jumping = (lr, lc)
-                self.jump_dir = [dr, dc]
                 self.selected = (lr, lc)
                 self.valid_dests = further
                 self.is_capture_mode = True
@@ -452,13 +466,13 @@ class GameClient:
             return None
         lr, lc, tr, tc, dr, dc = dest
         jr, jc = self.jumping
+        self._jumped_coords.add((tr, tc))
         BashniLogic.exec_jump(self.board, jr, jc, lr, lc, tr, tc, self.turn)
         self._capture_landings.append([lr, lc])
         self.last_to = (lr, lc)
-        further = BashniLogic.get_jumps_for(self.board, lr, lc, self.turn, last_dir=[dr, dc])
+        further = BashniLogic.get_jumps_for(self.board, lr, lc, self.turn, jumped_set=self._jumped_coords)
         if further:
             self.jumping = (lr, lc)
-            self.jump_dir = [dr, dc]
             self.selected = (lr, lc)
             self.valid_dests = further
             return None
@@ -499,9 +513,9 @@ class GameClient:
         self.valid_dests = []
         self.is_capture_mode = False
         self.jumping = None
-        self.jump_dir = None
         self._capture_from = None
         self._capture_landings = []
+        self._jumped_coords = set()
 
         # Update last_from / last_to from authoritative state
         lf = self.state["last_from"]
@@ -520,7 +534,7 @@ class GameClient:
                 if self.state["pos_history"].get(key, 0) >= 3:
                     self.status = "Draw \u2014 threefold repetition"
                 else:
-                    self.status = "Draw \u2014 25-move rule"
+                    self.status = "Draw \u2014 15-move rule"
             else:
                 winner_int = self._status_cache["winner"]
                 self.winner = PLAYER_TO_COLOR[winner_int]
@@ -533,34 +547,62 @@ class GameClient:
             self.status += "  (must capture)"
 
 
+# ── History view proxy ──────────────────────────────────────────────────────
+
+
+class _HistoryView:
+    """Lightweight proxy for rendering a past state without modifying GameClient."""
+
+    def __init__(self, state, game):
+        self.board = deepcopy(state["board"])
+        self.turn = state["turn"]
+        self.game_over = False
+        self.winner = None
+        lf = state.get("last_from")
+        lt = state.get("last_to")
+        self.last_from = tuple(lf) if lf else None
+        self.last_to = tuple(lt) if lt else None
+        name = "White" if self.turn == W else "Black"
+        self.status = f"{name}'s turn"
+        self.selected = None
+        self.valid_dests = []
+        self.is_capture_mode = False
+        self.hover_pos = None
+        self.online = game.online
+        self.my_player = game.my_player
+        self.is_my_turn = False
+        self.opponent_disconnected = False
+        self.net_error = ""
+
+
 # ── Rendering ────────────────────────────────────────────────────────────────
 
 
-def draw_board(surf, game, fonts):
+def draw_board(surf, game, fonts, flipped=False):
     surf.fill(C_BG)
 
     # Board squares
     for r in range(BOARD_N):
         for c in range(BOARD_N):
-            x, y = board_to_px(r, c)
+            x, y = board_to_px(r, c, flipped)
             color = C_DARK_SQ if is_dark(r, c) else C_LIGHT_SQ
             pygame.draw.rect(surf, color, (x, y, SQ, SQ))
 
     # Last-move highlight
     for pos in (game.last_from, game.last_to):
         if pos:
-            x, y = board_to_px(*pos)
+            x, y = board_to_px(pos[0], pos[1], flipped)
             _alpha_rect(surf, C_LASTMOVE, 42, (x, y, SQ, SQ))
 
     # Selected square
     if game.selected:
-        x, y = board_to_px(*game.selected)
+        x, y = board_to_px(game.selected[0], game.selected[1], flipped)
         _alpha_rect(surf, C_SEL, 75, (x, y, SQ, SQ))
 
     # Valid destinations
     for d in game.valid_dests:
         dr, dc = d[0], d[1]
-        x, y = board_to_px(dr, dc)
+        x, y = board_to_px(dr, dc, flipped)
         col = C_CAPTURE if game.is_capture_mode else C_MOVE
         _alpha_rect(surf, col, 55, (x, y, SQ, SQ))
         cx, cy = x + SQ // 2, y + SQ // 2
@@ -570,19 +612,21 @@ def draw_board(surf, game, fonts):
     if game.hover_pos:
         hr, hc = game.hover_pos
         if is_dark(hr, hc) and game.board[hr][hc]:
-            x, y = board_to_px(hr, hc)
+            x, y = board_to_px(hr, hc, flipped)
             _alpha_rect(surf, (255, 255, 255), 25, (x, y, SQ, SQ))
 
     # Coordinate labels
     fc = fonts["coord"]
-    for c in range(BOARD_N):
-        xc = MARGIN + c * SQ + SQ // 2
-        lbl = fc.render(COL_LABELS[c], True, C_COORD)
+    for i in range(BOARD_N):
+        xc = MARGIN + i * SQ + SQ // 2
+        c_idx = (BOARD_N - 1 - i) if flipped else i
+        lbl = fc.render(COL_LABELS[c_idx], True, C_COORD)
         surf.blit(lbl, lbl.get_rect(center=(xc, MARGIN + BOARD_PX + 12)))
         surf.blit(lbl, lbl.get_rect(center=(xc, MARGIN - 12)))
-    for r in range(BOARD_N):
-        yc = MARGIN + (BOARD_N - 1 - r) * SQ + SQ // 2
-        lbl = fc.render(str(r + 1), True, C_COORD)
+    for i in range(BOARD_N):
+        yc = MARGIN + i * SQ + SQ // 2
+        r_idx = i if flipped else (BOARD_N - 1 - i)
+        lbl = fc.render(str(r_idx + 1), True, C_COORD)
         surf.blit(lbl, lbl.get_rect(center=(MARGIN - 13, yc)))
 
     # Pieces
@@ -590,7 +634,7 @@ def draw_board(surf, game, fonts):
         for c in range(BOARD_N):
             col_data = game.board[r][c]
             if col_data:
-                draw_column(surf, col_data, *board_to_px(r, c), fonts)
+                draw_column(surf, col_data, *board_to_px(r, c, flipped), fonts)
 
     # Board border
     bx, by = MARGIN, MARGIN
@@ -619,7 +663,7 @@ def draw_board(surf, game, fonts):
         tag_x = MARGIN + BOARD_PX - tag.get_width() - 8
         surf.blit(tag, (tag_x, info_y + 16))
     else:
-        hint = fonts["hint"].render("R: Reset   U: Undo   Q: Quit", True, C_TEXT_DIM)
+        hint = fonts["hint"].render("R: Reset   U: Undo   F: Flip   Q: Quit", True, C_TEXT_DIM)
         hint_x = MARGIN + BOARD_PX - hint.get_width() - 8
         surf.blit(hint, (hint_x, info_y + 16))
 
@@ -851,8 +895,21 @@ def run_online(screen, net, my_player, initial_state):
         "panel_small": pygame.font.SysFont(family, 11),
     }
 
+    try:
+        from client.shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+    except ImportError:
+        from shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+
     game = GameClient(online=True, my_player=my_player)
     game.load_state(initial_state)
+
+    hist = History()
+    hist.push(initial_state)
+    orient = Orientation()
 
     running = True
     while running:
@@ -861,8 +918,10 @@ def run_online(screen, net, my_player, initial_state):
             mtype = msg.get("type")
             if mtype == "move_made":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
             elif mtype == "game_over":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
                 game.set_game_over(
                     msg.get("winner"),
                     msg.get("is_draw", False),
@@ -879,29 +938,31 @@ def run_online(screen, net, my_player, initial_state):
 
         # ── Events ──────────────────────────────────────────────────
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            result = handle_shared_input(event, hist, orient)
+            if result == "quit":
                 running = False
-
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    running = False
-
+            elif result in ("handled", "input_blocked"):
+                continue
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if game.game_over:
                     continue
-                pos = px_to_board(*event.pos)
+                pos = px_to_board(*event.pos, orient.flipped)
                 if pos is None:
                     continue
                 r, c = pos
                 move = game.click(r, c)
                 if move is not None:
                     net.send_move(move)
-
             elif event.type == pygame.MOUSEMOTION:
-                game.hover_pos = px_to_board(*event.pos)
+                game.hover_pos = px_to_board(*event.pos, orient.flipped)
 
         # ── Draw ────────────────────────────────────────────────────
-        draw_board(screen, game, fonts)
+        if hist.is_live:
+            display = game
+        else:
+            display = _HistoryView(hist.current(), game)
+        draw_board(screen, display, fonts, orient.flipped)
+        draw_command_panel(screen, hist, game.is_my_turn)
         pygame.display.flip()
         clock.tick(FPS)
 
@@ -912,7 +973,7 @@ def run_online(screen, net, my_player, initial_state):
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WIN_W, WIN_H))
-    pygame.display.set_caption("Bashni \u2014 12\u00d712 Column Draughts")
+    pygame.display.set_caption("Bashni \u2014 10\u00d710 Column Draughts")
     clock = pygame.time.Clock()
 
     family = None
@@ -932,6 +993,7 @@ def main():
     }
 
     game = GameClient()
+    flipped = False
 
     running = True
     while running:
@@ -945,14 +1007,16 @@ def main():
                     game.reset()
                 elif event.key == pygame.K_u:
                     game.undo()
+                elif event.key == pygame.K_f:
+                    flipped = not flipped
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                pos = px_to_board(*event.pos)
+                pos = px_to_board(*event.pos, flipped)
                 if pos:
                     game.click(*pos)
             elif event.type == pygame.MOUSEMOTION:
-                game.hover_pos = px_to_board(*event.pos)
+                game.hover_pos = px_to_board(*event.pos, flipped)
 
-        draw_board(screen, game, fonts)
+        draw_board(screen, game, fonts, flipped)
         pygame.display.flip()
         clock.tick(FPS)
 

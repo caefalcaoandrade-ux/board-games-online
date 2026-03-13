@@ -154,6 +154,7 @@ class GameClient:
         self.state = state
         self._status = self.logic.get_game_status(self.state)
         self.hovered = None
+        self.net_error = ""
 
     def set_game_over(self, winner, is_draw, reason=""):
         """Force game-over state from a server message (e.g. forfeit)."""
@@ -224,6 +225,41 @@ class GameClient:
         return True
 
 
+# ── History view proxy ──────────────────────────────────────────────────────
+
+
+class _HistoryView:
+    """Lightweight proxy for rendering a past state."""
+
+    def __init__(self, state, game):
+        self.state = state
+        self.board = state["board"]
+        self.turn = state["turn"]
+        self.move_count = state["move_count"]
+        self.swap_available = state["swap_available"]
+        self.size = state["size"]
+        self.last_move = state["last_move"]
+        self.win_type = state["win_type"]
+        self.winning_chain = state["winning_chain"]
+        self._status = game.logic.get_game_status(state)
+        self._game_over_message = None
+        self.hovered = None
+        self.geo = game.geo
+        self.online = game.online
+        self.my_player = game.my_player
+        self.is_my_turn = False
+        self.opponent_disconnected = False
+        self.net_error = ""
+
+    @property
+    def game_over(self):
+        return self._status["is_over"]
+
+    @property
+    def winner(self):
+        return self._status["winner"]
+
+
 # ── Renderer ────────────────────────────────────────────────────────────────
 
 class Renderer:
@@ -231,6 +267,7 @@ class Renderer:
 
     def __init__(self, screen, game):
         self.screen = screen
+        self.flipped = False
         S = game.size
 
         # Auto-scale hex size
@@ -277,10 +314,19 @@ class Renderer:
 
     # ── Coordinate transforms ──────────────────────────────────────────────
 
+    def _cell_center(self, cell):
+        """Pixel center for a hex cell, accounting for flip."""
+        cx, cy = self.centers[cell]
+        if self.flipped:
+            return (2 * self.cx - cx, 2 * self.cy - cy)
+        return (cx, cy)
+
     def px_to_hex(self, mx, my, game):
         """Convert pixel position to hex cell (q, r) tuple or None."""
         x = mx - self.cx
         y = my - self.cy
+        if self.flipped:
+            x, y = -x, -y
         hs = self.hex_size
         q = (math.sqrt(3) / 3 * x - y / 3) / hs
         r = (2.0 / 3 * y) / hs
@@ -320,7 +366,7 @@ class Renderer:
 
         # ── Board cells ────────────────────────────────────────────────────
         for cell in geo["cells"]:
-            cx, cy = self.centers[cell]
+            cx, cy = self._cell_center(cell)
             k = cell_key(cell[0], cell[1])
             stone = game.board.get(k, EMPTY)
 
@@ -381,8 +427,6 @@ class Renderer:
         if game.online:
             self._draw_online_status(game)
 
-        pygame.display.flip()
-
     # ── Edge labels ────────────────────────────────────────────────────────
 
     def _draw_edge_labels(self, game):
@@ -397,7 +441,7 @@ class Renderer:
             if not row:
                 continue
             letter = chr(ord('A') + row_i)
-            lx, ly = self.centers[row[0]]
+            lx, ly = self._cell_center(row[0])
             surf = self.f_small.render(letter, True, TEXT_DIM)
             self.screen.blit(surf, (lx - offset - surf.get_width() // 2,
                                     ly - surf.get_height() // 2))
@@ -406,7 +450,7 @@ class Renderer:
         # Column numbers along the bottom row
         bottom_row = sorted([c for c in game.geo["cells"] if c[1] == S - 1])
         for ci, cell in enumerate(bottom_row):
-            bx, by = self.centers[cell]
+            bx, by = self._cell_center(cell)
             num = str(ci + 1)
             surf = self.f_small.render(num, True, TEXT_DIM)
             self.screen.blit(surf, (bx - surf.get_width() // 2,
@@ -634,6 +678,15 @@ def run_online(screen, net, my_player, initial_state):
     Returns when the game ends or the user closes the window.
     Does **not** call ``pygame.quit()`` -- the caller handles cleanup.
     """
+    try:
+        from client.shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+    except ImportError:
+        from shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+
     size = initial_state.get("size", DEFAULT_SIZE)
 
     S = size
@@ -655,6 +708,9 @@ def run_online(screen, net, my_player, initial_state):
     game.load_state(initial_state)
 
     renderer = Renderer(screen, game)
+    hist = History()
+    hist.push(initial_state)
+    orient = Orientation()
 
     running = True
     while running:
@@ -663,8 +719,10 @@ def run_online(screen, net, my_player, initial_state):
             mtype = msg.get("type")
             if mtype == "move_made":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
             elif mtype == "game_over":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
                 game.set_game_over(
                     msg.get("winner"),
                     msg.get("is_draw", False),
@@ -681,12 +739,11 @@ def run_online(screen, net, my_player, initial_state):
 
         # ── Events ──────────────────────────────────────────────────
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            result = handle_shared_input(event, hist, orient)
+            if result == "quit":
                 running = False
-
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    running = False
+            elif result in ("handled", "input_blocked"):
+                continue
 
             elif event.type == pygame.MOUSEMOTION:
                 game.hovered = renderer.px_to_hex(
@@ -708,7 +765,14 @@ def run_online(screen, net, my_player, initial_state):
                         net.send_move(move)
 
         # ── Draw ────────────────────────────────────────────────────
-        renderer.draw(game)
+        renderer.flipped = orient.flipped
+        if hist.is_live:
+            display = game
+        else:
+            display = _HistoryView(hist.current(), game)
+        renderer.draw(display)
+        draw_command_panel(screen, hist, game.is_my_turn)
+        pygame.display.flip()
         clock.tick(30)
 
 
@@ -747,6 +811,8 @@ def main(board_size=DEFAULT_SIZE):
                     game.reset()
                 elif ev.key == pygame.K_u:
                     game.undo()
+                elif ev.key == pygame.K_f:
+                    renderer.flipped = not renderer.flipped
 
             elif ev.type == pygame.MOUSEMOTION:
                 game.hovered = renderer.px_to_hex(
@@ -763,6 +829,7 @@ def main(board_size=DEFAULT_SIZE):
                         game.place(cell[0], cell[1])
 
         renderer.draw(game)
+        pygame.display.flip()
         clock.tick(60)
 
     pygame.quit()

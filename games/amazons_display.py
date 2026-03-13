@@ -124,6 +124,7 @@ class GameClient:
         self.last_dst = None
         self.last_arrow = None
         self._game_over_message = None
+        self.net_error = ""
 
     def set_game_over(self, winner, is_draw, reason=""):
         """Force game-over state from a server message (e.g. forfeit)."""
@@ -239,6 +240,41 @@ class GameClient:
         return f"{FILES[c]}{BOARD_N - r}"
 
 
+# ── History view proxy ──────────────────────────────────────────────────────
+
+
+class _HistoryView:
+    """Lightweight proxy for rendering a past state."""
+
+    def __init__(self, state, game):
+        self.board = [row[:] for row in state["board"]]
+        self.turn = state["turn"]
+        self.move_num = state["move_num"]
+        self._status = game.logic.get_game_status(state)
+        self._game_over_message = None
+        self.sel = None
+        self.move_src = None
+        self.move_dst = None
+        self.targets = []
+        self.phase = PH_SELECT
+        self.last_src = None
+        self.last_dst = None
+        self.last_arrow = None
+        self.online = game.online
+        self.my_player = game.my_player
+        self.is_my_turn = False
+        self.opponent_disconnected = False
+        self.net_error = ""
+
+    @property
+    def game_over(self):
+        return self._status["is_over"]
+
+    @property
+    def winner(self):
+        return self._status["winner"]
+
+
 # ── Rendering ────────────────────────────────────────────────────────────────
 
 
@@ -288,6 +324,7 @@ class Renderer:
 
     def __init__(self, screen):
         self.screen = screen
+        self.flipped = False
         self.coord_font = pygame.font.SysFont("monospace", 14)
         self.status_font = pygame.font.SysFont("sans-serif", 18, bold=True)
         self.hint_font = pygame.font.SysFont("monospace", 13)
@@ -311,12 +348,26 @@ class Renderer:
     # ── Helpers ──────────────────────────────────────────────────────────
 
     def _sq_px(self, r, c):
-        """Top-left pixel of square (r, c)."""
+        """Top-left pixel of square (r, c), accounting for flip."""
+        if self.flipped:
+            return BX + (BOARD_N - 1 - c) * CELL, BY + (BOARD_N - 1 - r) * CELL
         return BX + c * CELL, BY + r * CELL
 
     def _sq_center(self, r, c):
         x, y = self._sq_px(r, c)
         return x + CELL // 2, y + CELL // 2
+
+    def pixel_to_cell(self, mx, my):
+        """Convert pixel position to board (r, c), or None."""
+        bx = mx - BX
+        by = my - BY
+        if bx < 0 or by < 0 or bx >= BOARD_PX or by >= BOARD_PX:
+            return None
+        gc = bx // CELL
+        gr = by // CELL
+        if self.flipped:
+            return BOARD_N - 1 - gr, BOARD_N - 1 - gc
+        return gr, gc
 
     def _fill_sq(self, r, c, rgba):
         self._hl.fill(rgba)
@@ -357,12 +408,9 @@ class Renderer:
 
         # hover highlight
         if mouse_pos and not game.game_over:
-            mx, my = mouse_pos
-            hc = (mx - BX) // CELL
-            hr = (my - BY) // CELL
-            if 0 <= hr < BOARD_N and 0 <= hc < BOARD_N:
-                if (hr, hc) in game.targets:
-                    self._fill_sq(hr, hc, C_HOVER)
+            cell = self.pixel_to_cell(*mouse_pos)
+            if cell and cell in game.targets:
+                self._fill_sq(*cell, C_HOVER)
 
         # valid-target dots
         for tr, tc in game.targets:
@@ -395,15 +443,17 @@ class Renderer:
 
         for i in range(BOARD_N):
             # files
-            lbl = self.coord_font.render(FILES[i], True, C_COORD)
+            f_idx = (BOARD_N - 1 - i) if self.flipped else i
+            lbl = self.coord_font.render(FILES[f_idx], True, C_COORD)
             x = BX + i * CELL + CELL // 2 - lbl.get_width() // 2
             scr.blit(lbl, (x, BY - MARGIN + 6))
             scr.blit(lbl, (x, BY + BOARD_PX + 6))
             # ranks
-            rank_str = str(BOARD_N - i)
+            rank_num = (i + 1) if self.flipped else (BOARD_N - i)
+            rank_str = str(rank_num)
             lbl = self.coord_font.render(rank_str, True, C_COORD)
             y = BY + i * CELL + CELL // 2 - lbl.get_height() // 2
-            scr.blit(lbl, (BX - MARGIN + 4 + (8 if BOARD_N - i < 10 else 0), y))
+            scr.blit(lbl, (BX - MARGIN + 4 + (8 if rank_num < 10 else 0), y))
             scr.blit(lbl, (BX + BOARD_PX + 8, y))
 
         # ── Status bar ───────────────────────────────────────────────────
@@ -451,6 +501,7 @@ class Renderer:
             parts = []
             if game.phase == PH_ARROW:
                 parts.append("Right-click: undo")
+            parts.append("F: flip")
             parts.append("R: new game")
             parts.append("Esc: quit")
             hint = self.hint_font.render("    ".join(parts), True, C_HINT_TXT)
@@ -458,8 +509,6 @@ class Renderer:
 
         if game.online:
             self._draw_online_status(game)
-
-        pygame.display.flip()
 
     # ── Online overlays ───────────────────────────────────────────────
 
@@ -518,6 +567,15 @@ def run_online(screen, net, my_player, initial_state):
     Returns when the game ends or the user closes the window.
     Does **not** call ``pygame.quit()`` — the caller handles cleanup.
     """
+    try:
+        from client.shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+    except ImportError:
+        from shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("Amazons \u2014 Online")
     clock = pygame.time.Clock()
@@ -526,6 +584,10 @@ def run_online(screen, net, my_player, initial_state):
     game = GameClient(online=True, my_player=my_player)
     game.load_state(initial_state)
 
+    hist = History()
+    hist.push(initial_state)
+    orient = Orientation()
+
     running = True
     while running:
         # ── Poll network ────────────────────────────────────────────
@@ -533,8 +595,10 @@ def run_online(screen, net, my_player, initial_state):
             mtype = msg.get("type")
             if mtype == "move_made":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
             elif mtype == "game_over":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
                 game.set_game_over(
                     msg.get("winner"),
                     msg.get("is_draw", False),
@@ -553,25 +617,30 @@ def run_online(screen, net, my_player, initial_state):
         mouse_pos = pygame.mouse.get_pos()
 
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            result = handle_shared_input(event, hist, orient)
+            if result == "quit":
                 running = False
-
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    running = False
-
+            elif result in ("handled", "input_blocked"):
+                continue
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if game.game_over:
                     continue
-                mx, my = event.pos
-                col = (mx - BX) // CELL
-                row = (my - BY) // CELL
-                move = game.click(row, col)
+                cell = renderer.pixel_to_cell(*event.pos)
+                if cell is None:
+                    continue
+                move = game.click(*cell)
                 if move is not None:
                     net.send_move(move)
 
         # ── Draw ────────────────────────────────────────────────────
-        renderer.draw(game, mouse_pos)
+        renderer.flipped = orient.flipped
+        if hist.is_live:
+            display = game
+        else:
+            display = _HistoryView(hist.current(), game)
+        renderer.draw(display, mouse_pos)
+        draw_command_panel(screen, hist, game.is_my_turn)
+        pygame.display.flip()
         clock.tick(30)
 
 
@@ -602,17 +671,20 @@ def main():
                     game.reset()
                 elif ev.key == pygame.K_u:
                     game.undo_move()
+                elif ev.key == pygame.K_f:
+                    renderer.flipped = not renderer.flipped
 
             elif ev.type == pygame.MOUSEBUTTONDOWN:
-                mx, my = ev.pos
-                col = (mx - BX) // CELL
-                row = (my - BY) // CELL
+                cell = renderer.pixel_to_cell(*ev.pos)
+                if cell is None:
+                    continue
                 if ev.button == 1:
-                    game.click(row, col)
+                    game.click(*cell)
                 elif ev.button == 3:
                     game.undo_move()
 
         renderer.draw(game, mouse_pos)
+        pygame.display.flip()
         clock.tick(30)
 
 

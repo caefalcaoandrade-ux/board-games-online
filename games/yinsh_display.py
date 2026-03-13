@@ -112,8 +112,11 @@ def h2p(q, r):
             BOARD_CY - HEX_SP * r * SQRT3_2)
 
 
-def p2h(mx, my):
+def p2h(mx, my, flipped=False):
     """Pixel → nearest valid hex (or None if too far)."""
+    if flipped:
+        mx = 2 * BOARD_CX - mx
+        my = 2 * BOARD_CY - my
     rf = (BOARD_CY - my) / (HEX_SP * SQRT3_2)
     qf = (mx - BOARD_CX) / HEX_SP - rf * 0.5
     sf = -qf - rf
@@ -246,6 +249,7 @@ class GameClient:
         self.hover = None
         self.last_marker = None
         self.last_dest = None
+        self.net_error = ""
         self._sim_rings = None
         self._sim_markers = None
 
@@ -600,14 +604,78 @@ class GameClient:
 #  RENDERER
 # ════════════════════════════════════════════════════════════════════
 
+class _HistoryView:
+    """Lightweight proxy for rendering a past state."""
+
+    def __init__(self, state, game):
+        self.rings = state["rings"]
+        self.markers = state["markers"]
+        self.pool = state["pool"]
+        self.removed = state["removed"]
+        self.placed = state["placed"]
+        self.turn = state["turn"]
+        self.phase = state["phase"]
+        self.sub_state = state["sub_state"]
+        self._status = game.logic.get_game_status(state)
+        self.sel = None
+        self.vmoves = []
+        self.crows = []
+        self.crow_i = 0
+        self.rplayer = None
+        self.hover = None
+        self.last_marker = None
+        self.last_dest = None
+        self.online = game.online
+        self.my_player = game.my_player
+        self.is_my_turn = False
+        self.opponent_disconnected = False
+        self.net_error = ""
+
+    @property
+    def game_over(self):
+        return self._status["is_over"]
+
+    @property
+    def winner(self):
+        return self._status["winner"]
+
+    @property
+    def is_draw(self):
+        return self._status.get("is_draw", False)
+
+    @property
+    def pname(self):
+        return "White" if self.turn == WHITE else "Black"
+
+    @property
+    def rname(self):
+        return self.pname
+
+    @property
+    def status(self):
+        if self.sub_state == ST_GAME_OVER:
+            if self.is_draw:
+                return "Game over  \u2014  Draw!"
+            w = "White" if self.winner == WHITE else "Black"
+            return "Game over  \u2014  {} wins!".format(w)
+        return "{}'s turn".format(self.pname)
+
+
 class Renderer:
     def __init__(self, surf):
         self.s = surf
+        self.flipped = False
         pygame.font.init()
         self.f_sm = pygame.font.SysFont("consolas", 14)
         self.f_md = pygame.font.SysFont("consolas", 16, bold=True)
         self.f_lg = pygame.font.SysFont("consolas", 21, bold=True)
         self.f_xl = pygame.font.SysFont("consolas", 34, bold=True)
+
+    def _fp(self, px, py):
+        """Flip a pixel position 180° around the board center."""
+        if self.flipped:
+            return (2 * BOARD_CX - px, 2 * BOARD_CY - py)
+        return (px, py)
 
     def draw(self, g):
         self.s.fill(BG)
@@ -619,22 +687,23 @@ class Renderer:
         self._panel(g)
         if g.online:
             self._draw_online_status(g)
-        pygame.display.flip()
 
     # ── board ─────────────────────────────────────────────────
 
     def _grid(self):
         for a, b in GRID_SEGS:
-            pygame.draw.aaline(self.s, GRID_LINE_C, a, b)
+            pygame.draw.aaline(self.s, GRID_LINE_C, self._fp(*a), self._fp(*b))
         for pos in VALID_POSITIONS:
-            px, py = h2p(pos[0], pos[1])
+            px, py = self._fp(*h2p(pos[0], pos[1]))
             pygame.draw.circle(self.s, GRID_DOT_C, (int(px), int(py)), DOT_R)
 
     def _labels(self):
-        for lbl, (x, y) in COL_LBL.items():
+        for lbl, pos in COL_LBL.items():
+            x, y = self._fp(*pos)
             t = self.f_sm.render(lbl, True, LABEL_C)
             self.s.blit(t, (x - t.get_width() // 2, y - t.get_height() // 2))
-        for lbl, (x, y) in ROW_LBL.items():
+        for lbl, pos in ROW_LBL.items():
+            x, y = self._fp(*pos)
             t = self.f_sm.render(lbl, True, LABEL_C)
             self.s.blit(t, (x - t.get_width() // 2, y - t.get_height() // 2))
 
@@ -644,7 +713,7 @@ class Renderer:
         # last move feedback
         for lp in [g.last_marker, g.last_dest]:
             if lp:
-                px, py = h2p(lp[0], lp[1])
+                px, py = self._fp(*h2p(lp[0], lp[1]))
                 hs = pygame.Surface((RING_R * 2 + 12, RING_R * 2 + 12), pygame.SRCALPHA)
                 pygame.draw.circle(hs, HL_LAST, (RING_R + 6, RING_R + 6), RING_R + 5)
                 self.s.blit(hs, (px - RING_R - 6, py - RING_R - 6))
@@ -652,14 +721,14 @@ class Renderer:
         # valid moves
         if g.sub_state == ST_MOVE_RING:
             for vpos in g.vmoves:
-                px, py = h2p(vpos[0], vpos[1])
+                px, py = self._fp(*h2p(vpos[0], vpos[1]))
                 hs = pygame.Surface((MARKER_R * 2 + 8, MARKER_R * 2 + 8), pygame.SRCALPHA)
                 pygame.draw.circle(hs, HL_VALID, (MARKER_R + 4, MARKER_R + 4), MARKER_R + 3)
                 self.s.blit(hs, (px - MARKER_R - 4, py - MARKER_R - 4))
 
         # selected ring
         if g.sel:
-            px, py = h2p(g.sel[0], g.sel[1])
+            px, py = self._fp(*h2p(g.sel[0], g.sel[1]))
             pygame.draw.circle(self.s, HL_SELECT, (int(px), int(py)), RING_R + 5, 3)
 
         # candidate rows
@@ -667,7 +736,7 @@ class Renderer:
             for i, row in enumerate(g.crows):
                 c = HL_ROW if i == g.crow_i else HL_ROW_ALT
                 for rpos in row:
-                    px, py = h2p(rpos[0], rpos[1])
+                    px, py = self._fp(*h2p(rpos[0], rpos[1]))
                     pygame.draw.circle(self.s, c, (int(px), int(py)), MARKER_R + 6, 3)
 
         # removable rings
@@ -675,7 +744,7 @@ class Renderer:
             for k, v in g.rings.items():
                 if v == g.rplayer:
                     pos = _from_key(k)
-                    px, py = h2p(pos[0], pos[1])
+                    px, py = self._fp(*h2p(pos[0], pos[1]))
                     pygame.draw.circle(self.s, HL_RING_REM, (int(px), int(py)), RING_R + 6, 3)
 
     # ── pieces ────────────────────────────────────────────────
@@ -684,7 +753,7 @@ class Renderer:
         # markers
         for k, c in g.markers.items():
             pos = _from_key(k)
-            px, py = h2p(pos[0], pos[1])
+            px, py = self._fp(*h2p(pos[0], pos[1]))
             ip = (int(px), int(py))
             fill = W_MARKER_FILL if c == WHITE else B_MARKER_FILL
             edge = W_MARKER_EDGE if c == WHITE else B_MARKER_EDGE
@@ -694,7 +763,7 @@ class Renderer:
         # rings (annulus: thick outline = hollow centre)
         for k, c in g.rings.items():
             pos = _from_key(k)
-            px, py = h2p(pos[0], pos[1])
+            px, py = self._fp(*h2p(pos[0], pos[1]))
             ip = (int(px), int(py))
             fill = W_RING_FILL if c == WHITE else B_RING_FILL
             edge = W_RING_EDGE if c == WHITE else B_RING_EDGE
@@ -710,7 +779,7 @@ class Renderer:
         if g.hover and is_valid_pos(g.hover[0], g.hover[1]):
             q, r = g.hover[0], g.hover[1]
             lbl = clabel(q, r)
-            px, py = h2p(q, r)
+            px, py = self._fp(*h2p(q, r))
             t = self.f_sm.render(lbl, True, TXT_DARK)
             tx, ty = int(px) + 20, int(py) - 20
             if tx + t.get_width() > WINDOW_W - 20:
@@ -921,12 +990,25 @@ def run_online(screen, net, my_player, initial_state):
 
     Does **not** call ``pygame.quit()``.
     """
+    try:
+        from client.shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+    except ImportError:
+        from shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+
     screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
     pygame.display.set_caption("YINSH \u2014 Online")
     clock = pygame.time.Clock()
     renderer = Renderer(screen)
     game = GameClient(online=True, my_player=my_player)
     game.load_state(initial_state)
+
+    hist = History()
+    hist.push(initial_state)
+    orient = Orientation()
 
     running = True
     while running:
@@ -935,8 +1017,10 @@ def run_online(screen, net, my_player, initial_state):
             mtype = msg.get("type")
             if mtype == "move_made":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
             elif mtype == "game_over":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
                 game.set_game_over(
                     msg.get("winner"),
                     msg.get("is_draw", False),
@@ -953,24 +1037,30 @@ def run_online(screen, net, my_player, initial_state):
 
         # ── Events ──────────────────────────────────────────────────
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            # Left/Right are used for row cycling during ST_CHOOSE_ROW —
+            # let the game handle them in that state instead of history nav
+            if (event.type == pygame.KEYDOWN
+                    and event.key in (pygame.K_LEFT, pygame.K_RIGHT)
+                    and hist.is_live
+                    and game.sub_state == ST_CHOOSE_ROW):
+                game.cycle(-1 if event.key == pygame.K_LEFT else 1)
+                continue
+
+            result = handle_shared_input(event, hist, orient)
+            if result == "quit":
                 running = False
+            elif result in ("handled", "input_blocked"):
+                continue
 
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_q:
-                    running = False
-                elif event.key == pygame.K_ESCAPE:
+                if event.key == pygame.K_ESCAPE:
                     if game.game_over:
                         running = False
                     else:
                         game.rclick()
-                elif event.key == pygame.K_LEFT:
-                    game.cycle(-1)
-                elif event.key == pygame.K_RIGHT:
-                    game.cycle(1)
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                pos = p2h(*event.pos)
+                pos = p2h(*event.pos, orient.flipped)
                 if event.button == 1:
                     if game.game_over:
                         continue
@@ -981,10 +1071,17 @@ def run_online(screen, net, my_player, initial_state):
                     game.rclick()
 
             elif event.type == pygame.MOUSEMOTION:
-                game.hover = p2h(*event.pos)
+                game.hover = p2h(*event.pos, orient.flipped)
 
         # ── Draw ────────────────────────────────────────────────────
-        renderer.draw(game)
+        renderer.flipped = orient.flipped
+        if hist.is_live:
+            display = game
+        else:
+            display = _HistoryView(hist.current(), game)
+        renderer.draw(display)
+        draw_command_panel(screen, hist, game.is_my_turn)
+        pygame.display.flip()
         clock.tick(FPS)
 
 
@@ -1011,22 +1108,25 @@ def main():
                     pygame.quit(); sys.exit()
                 elif ev.key == pygame.K_n:
                     game.reset()
+                elif ev.key == pygame.K_f:
+                    renderer.flipped = not renderer.flipped
                 elif ev.key == pygame.K_LEFT:
                     game.cycle(-1)
                 elif ev.key == pygame.K_RIGHT:
                     game.cycle(1)
 
             elif ev.type == pygame.MOUSEBUTTONDOWN:
-                pos = p2h(*ev.pos)
+                pos = p2h(*ev.pos, renderer.flipped)
                 if ev.button == 1:
                     game.click(pos)
                 elif ev.button == 3:
                     game.rclick()
 
             elif ev.type == pygame.MOUSEMOTION:
-                game.hover = p2h(*ev.pos)
+                game.hover = p2h(*ev.pos, renderer.flipped)
 
         renderer.draw(game)
+        pygame.display.flip()
         clock.tick(FPS)
 
 

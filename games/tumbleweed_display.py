@@ -73,16 +73,20 @@ COLOUR_RGB = {RED: RED_C, WHITE: WHT_C, NEUTRAL: NEU_C}
 
 # ── Hex geometry helpers ─────────────────────────────────────────────────────
 
-def _cube2px(x, z):
+def _cube2px(x, z, flipped=False):
     """Cube coordinate -> pixel centre (flat-top hex)."""
-    px = HEX_R * 1.5 * x + BOARD_CX
-    py = HEX_R * _S3 * (z + x * 0.5) + BOARD_CY
-    return (px, py)
+    ox = HEX_R * 1.5 * x
+    oy = HEX_R * _S3 * (z + x * 0.5)
+    if flipped:
+        return (BOARD_CX - ox, BOARD_CY - oy)
+    return (BOARD_CX + ox, BOARD_CY + oy)
 
 
-def _px2cube(mx, my):
+def _px2cube(mx, my, flipped=False):
     """Pixel -> nearest valid cube coordinate as a cell key string, or None."""
     px, py = mx - BOARD_CX, my - BOARD_CY
+    if flipped:
+        px, py = -px, -py
     q = (2.0 / 3.0 * px) / HEX_R
     r = (-px / 3.0 + _S3 / 3.0 * py) / HEX_R
     fx, fz = q, r
@@ -220,6 +224,7 @@ class GameClient:
         """Replace the authoritative state from the server."""
         self.state = state
         self._status = self.logic.get_game_status(self.state)
+        self.net_error = ""
 
     def set_game_over(self, winner, is_draw, reason=""):
         """Force game-over state from a server message (e.g. forfeit)."""
@@ -342,6 +347,42 @@ class GameClient:
         )
 
 
+# ── History view proxy ──────────────────────────────────────────────────────
+
+
+class _HistoryView:
+    """Lightweight proxy for rendering a past state."""
+
+    def __init__(self, state, game):
+        self.phase = state["phase"]
+        self.turn = state["turn"]
+        self.stacks = state["stacks"]
+        self.msg = state["msg"]
+        self.scores = state["scores"]
+        self.ctrl_map = state["ctrl_map"]
+        self.winner = state["winner"]
+        self._status = game.logic.get_game_status(state)
+        self.all_cells = game.all_cells
+        self.all_cells_set = game.all_cells_set
+        self.total_cells = game.total_cells
+        self.online = game.online
+        self.my_player = game.my_player
+        self.is_my_turn = False
+        self.opponent_disconnected = False
+        self.net_error = ""
+
+    @property
+    def game_over(self):
+        return self._status["is_over"]
+
+    def flos(self, cell_key, colour):
+        return TumbleweedLogic.flos(
+            cell_key, colour, self.stacks, self.all_cells_set)
+
+    def legal_set(self):
+        return set()
+
+
 # ── Rendering ────────────────────────────────────────────────────────────────
 
 class Renderer:
@@ -349,6 +390,7 @@ class Renderer:
 
     def __init__(self, screen):
         self.screen = screen
+        self.flipped = False
 
         # fonts
         try:
@@ -377,6 +419,12 @@ class Renderer:
             px, py = _cube2px(x_min, z)
             self.row_label_pos[z] = (px - HEX_R - 14, py)
 
+    def _flip_px(self, px, py):
+        """Flip a pixel position 180° around the board center."""
+        if self.flipped:
+            return (2 * BOARD_CX - px, 2 * BOARD_CY - py)
+        return (px, py)
+
     def _precompute_cell_px(self, game):
         """Pre-compute pixel centres for every cell. Called once."""
         cell_px = {}
@@ -394,7 +442,7 @@ class Renderer:
 
         # ── board hexes ──────────────────────────────────────────────────
         for cell_key in game.all_cells:
-            cx, cy = cell_px[cell_key]
+            cx, cy = self._flip_px(*cell_px[cell_key])
             pts = _hex_corners(cx, cy)
             is_legal = cell_key in ls
             is_hover = (cell_key == hover)
@@ -440,12 +488,14 @@ class Renderer:
                                   icy - txt.get_height() // 2))
 
         # ── coordinate labels along edges ────────────────────────────────
-        for x, (lx, ly) in self.col_label_pos.items():
+        for x, pos in self.col_label_pos.items():
+            lx, ly = self._flip_px(*pos)
             letter = chr(65 + x + S - 1)
             t = self.fn_tiny.render(letter, True, TXT_DIM)
             screen.blit(t, (lx - t.get_width() // 2, ly - t.get_height() // 2))
 
-        for z, (lx, ly) in self.row_label_pos.items():
+        for z, pos in self.row_label_pos.items():
+            lx, ly = self._flip_px(*pos)
             num_str = str(z + S)
             t = self.fn_tiny.render(num_str, True, TXT_DIM)
             screen.blit(t, (lx - t.get_width(), ly - t.get_height() // 2))
@@ -660,6 +710,15 @@ def run_online(screen, net, my_player, initial_state):
     Returns when the game ends or the user closes the window.
     Does **not** call ``pygame.quit()`` -- the caller handles cleanup.
     """
+    try:
+        from client.shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+    except ImportError:
+        from shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("Tumbleweed \u2014 Online")
     clock = pygame.time.Clock()
@@ -670,6 +729,10 @@ def run_online(screen, net, my_player, initial_state):
 
     # pre-compute pixel centres for every cell
     cell_px = renderer._precompute_cell_px(game)
+
+    hist = History()
+    hist.push(initial_state)
+    orient = Orientation()
 
     # buttons
     PX = PANEL_LEFT + 35
@@ -688,8 +751,10 @@ def run_online(screen, net, my_player, initial_state):
             mtype = msg.get("type")
             if mtype == "move_made":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
             elif mtype == "game_over":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
                 game.set_game_over(
                     msg.get("winner"),
                     msg.get("is_draw", False),
@@ -705,17 +770,18 @@ def run_online(screen, net, my_player, initial_state):
                 game.net_error = msg.get("message", "Connection lost")
 
         mx, my = pygame.mouse.get_pos()
-        hover = _px2cube(mx, my)
+        hover = _px2cube(mx, my, orient.flipped)
 
         # ── Events ──────────────────────────────────────────────────
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            result = handle_shared_input(event, hist, orient)
+            if result == "quit":
                 running = False
+            elif result in ("handled", "input_blocked"):
+                continue
 
             elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    running = False
-                elif event.key == pygame.K_p and game.phase == PH_PLAY:
+                if event.key == pygame.K_p and game.phase == PH_PLAY:
                     move = game.do_pass()
                     if move is not None:
                         net.send_move(move)
@@ -754,19 +820,27 @@ def run_online(screen, net, my_player, initial_state):
             b.update(mx, my)
 
         # legal move set
-        ls = game.legal_set() if game.phase == PH_PLAY else set()
+        renderer.flipped = orient.flipped
+        if hist.is_live:
+            display = game
+            ls = game.legal_set() if game.phase == PH_PLAY else set()
+        else:
+            display = _HistoryView(hist.current(), game)
+            ls = set()
 
         # ── Draw ────────────────────────────────────────────────────
-        renderer.draw(game, hover, ls, cell_px)
+        renderer.draw(display, hover, ls, cell_px)
 
         # draw buttons that the renderer delegates to main loop
         fn_body = renderer.fn_body
-        if game.phase == PH_PIE and game.is_my_turn:
-            btn_red.draw(screen, fn_body)
-            btn_white.draw(screen, fn_body)
-        if game.phase == PH_PLAY and game.is_my_turn:
-            btn_pass.draw(screen, fn_body)
+        if hist.is_live:
+            if game.phase == PH_PIE and game.is_my_turn:
+                btn_red.draw(screen, fn_body)
+                btn_white.draw(screen, fn_body)
+            if game.phase == PH_PLAY and game.is_my_turn:
+                btn_pass.draw(screen, fn_body)
 
+        draw_command_panel(screen, hist, game.is_my_turn)
         pygame.display.flip()
         clock.tick(FPS)
 
@@ -799,7 +873,7 @@ def main():
 
     while running:
         mx, my = pygame.mouse.get_pos()
-        hover = _px2cube(mx, my)
+        hover = _px2cube(mx, my, renderer.flipped)
 
         # ── events ───────────────────────────────────────────────────────
         for ev in pygame.event.get():
@@ -809,6 +883,8 @@ def main():
             elif ev.type == pygame.KEYDOWN:
                 if ev.key in (pygame.K_q, pygame.K_ESCAPE):
                     running = False
+                elif ev.key == pygame.K_f:
+                    renderer.flipped = not renderer.flipped
                 elif ev.key == pygame.K_n:
                     game.reset()
                 elif ev.key == pygame.K_p and game.phase == PH_PLAY:

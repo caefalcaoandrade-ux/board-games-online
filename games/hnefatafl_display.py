@@ -2,7 +2,8 @@
 Copenhagen Hnefatafl 11x11 -- Pygame display and local hotseat play.
 
 Two players on the same computer taking turns.
-Controls: Left-click to select/move. U to undo. R to restart. Esc/Q to quit.
+Controls: Left-click to select/move. U to undo. R to restart. F to flip.
+          Esc/Q to quit. Left/Right arrows to browse history (online).
 """
 
 import copy
@@ -122,6 +123,7 @@ class GameClient:
         self._sync()
         self.sel = None
         self.targets = []
+        self.net_error = ""
 
     def set_game_over(self, winner, is_draw, reason=""):
         """Force game-over state from a server message (e.g. forfeit)."""
@@ -202,18 +204,32 @@ class GameClient:
     def piece_counts(self):
         return HnefataflLogic.piece_counts(self.board)
 
-    @staticmethod
-    def click_to_cell(mx, my):
-        """Convert pixel coordinates to board cell (r, c), or None."""
-        bx = mx - LABEL_M
-        by = my - TOP_M
-        if bx < 0 or by < 0 or bx >= BOARD_PX or by >= BOARD_PX:
-            return None
-        c = bx // CELL
-        r = (N - 1) - (by // CELL)
-        if not HnefataflLogic.in_bounds(r, c):
-            return None
-        return r, c
+
+# ── History view proxy ──────────────────────────────────────────────────────
+
+
+class _HistoryView:
+    """Lightweight proxy for rendering a past state without modifying GameClient."""
+
+    def __init__(self, state, game):
+        self.board = state["board"]
+        self.turn = state["turn"]
+        self.game_over = state["game_over"]
+        self.winner = state["winner"]
+        self.message = state["message"]
+        self.last_move = state["last_move"]
+        self.captured_last = state["captured_last"]
+        self.sel = None
+        self.targets = []
+        self.online = game.online
+        self.my_player = game.my_player
+        self.is_my_turn = False
+        self.opponent_disconnected = False
+        self.net_error = ""
+        self._board = state["board"]
+
+    def piece_counts(self):
+        return HnefataflLogic.piece_counts(self._board)
 
 
 # ── Renderer ─────────────────────────────────────────────────────────────────
@@ -222,20 +238,41 @@ class GameClient:
 class Renderer:
     def __init__(self, screen):
         self.screen = screen
+        self.flipped = False
         self.font = pygame.font.SysFont("Arial", 20, bold=True)
         self.sfont = pygame.font.SysFont("Arial", 14)
         self.bfont = pygame.font.SysFont("Arial", 26, bold=True)
 
     # ── Coordinate conversion ─────────────────────────────────────────────
 
-    @staticmethod
-    def cell_xy(r, c):
-        """Top-left pixel of board cell (r, c)."""
+    def cell_xy(self, r, c):
+        """Top-left pixel of board cell (r, c), accounting for flip."""
+        if self.flipped:
+            return LABEL_M + (N - 1 - c) * CELL, TOP_M + r * CELL
         return LABEL_M + c * CELL, TOP_M + (N - 1 - r) * CELL
+
+    def pixel_to_cell(self, mx, my):
+        """Convert pixel coordinates to board (r, c), or None."""
+        bx = mx - LABEL_M
+        by = my - TOP_M
+        if bx < 0 or by < 0 or bx >= BOARD_PX or by >= BOARD_PX:
+            return None
+        gc = bx // CELL
+        gr = by // CELL
+        if self.flipped:
+            c = N - 1 - gc
+            r = gr
+        else:
+            c = gc
+            r = (N - 1) - gr
+        if not HnefataflLogic.in_bounds(r, c):
+            return None
+        return r, c
 
     # ── Main draw ─────────────────────────────────────────────────────────
 
     def draw(self, game):
+        """Draw the full frame (does NOT call pygame.display.flip)."""
         self.screen.fill(C_BG)
         self._draw_board()
         self._draw_highlights(game)
@@ -244,7 +281,6 @@ class Renderer:
         self._draw_panel(game)
         if game.online:
             self._draw_online_status(game)
-        pygame.display.flip()
 
     # ── Board grid ────────────────────────────────────────────────────────
 
@@ -359,16 +395,18 @@ class Renderer:
 
     def _draw_labels(self):
         # Columns (below board)
-        for c in range(N):
-            x = LABEL_M + c * CELL + CELL // 2
+        for i in range(N):
+            x = LABEL_M + i * CELL + CELL // 2
             y = TOP_M + BOARD_PX + 14
-            txt = self.font.render(COL_LABELS[c], True, C_LABEL)
+            c_idx = (N - 1 - i) if self.flipped else i
+            txt = self.font.render(COL_LABELS[c_idx], True, C_LABEL)
             self.screen.blit(txt, txt.get_rect(center=(x, y)))
         # Rows (left of board)
-        for r in range(N):
+        for i in range(N):
             x = LABEL_M // 2
-            y = TOP_M + (N - 1 - r) * CELL + CELL // 2
-            txt = self.font.render(str(r + 1), True, C_LABEL)
+            y = TOP_M + i * CELL + CELL // 2
+            r_idx = i if self.flipped else (N - 1 - i)
+            txt = self.font.render(str(r_idx + 1), True, C_LABEL)
             self.screen.blit(txt, txt.get_rect(center=(x, y)))
 
     # ── Status panel ──────────────────────────────────────────────────────
@@ -395,7 +433,8 @@ class Renderer:
             tag = self.sfont.render(f"You: {role}", True, accent)
             self.screen.blit(tag, (WIN_W - tag.get_width() - 12, py + 44))
         else:
-            hint = self.sfont.render("R Restart   U Undo   Q Quit", True, C_LABEL)
+            hint = self.sfont.render("R Restart   U Undo   F Flip   Q Quit",
+                                     True, C_LABEL)
             self.screen.blit(hint, (WIN_W - hint.get_width() - 12, py + 44))
 
         # If game over, overlay banner
@@ -429,17 +468,10 @@ class Renderer:
             self.screen.blit(sub, sub.get_rect(center=(WIN_W // 2,
                                                         banner_y + 56)))
 
-
     # ── Online overlays ───────────────────────────────────────────────
 
     def _draw_online_status(self, game):
         """Draw overlays specific to online multiplayer."""
-        # "Waiting for opponent" when it's not your turn
-        if not game.game_over and not game.is_my_turn:
-            wait = self.sfont.render(
-                "Opponent's turn \u2014 waiting\u2026", True, C_LABEL)
-            self.screen.blit(wait, (12, TOP_M - 14))
-
         # Opponent disconnected banner
         if game.opponent_disconnected and not game.game_over:
             overlay = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
@@ -485,6 +517,15 @@ def run_online(screen, net, my_player, initial_state):
     Returns when the game ends or the user closes the window.
     Does **not** call ``pygame.quit()`` — the caller handles cleanup.
     """
+    try:
+        from client.shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+    except ImportError:
+        from shared import (
+            History, Orientation, draw_command_panel, handle_shared_input,
+        )
+
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("Copenhagen Hnefatafl \u2014 Online")
     clock = pygame.time.Clock()
@@ -493,6 +534,10 @@ def run_online(screen, net, my_player, initial_state):
     game = GameClient(online=True, my_player=my_player)
     game.load_state(initial_state)
 
+    hist = History()
+    hist.push(initial_state)
+    orient = Orientation()
+
     running = True
     while running:
         # ── Poll network ────────────────────────────────────────────
@@ -500,8 +545,10 @@ def run_online(screen, net, my_player, initial_state):
             mtype = msg.get("type")
             if mtype == "move_made":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
             elif mtype == "game_over":
                 game.load_state(msg["state"])
+                hist.push(msg["state"])
                 game.set_game_over(
                     msg.get("winner"),
                     msg.get("is_draw", False),
@@ -518,17 +565,16 @@ def run_online(screen, net, my_player, initial_state):
 
         # ── Events ──────────────────────────────────────────────────
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            result = handle_shared_input(event, hist, orient)
+            if result == "quit":
                 running = False
-
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    running = False
-
+            elif result in ("handled", "input_blocked"):
+                continue
+            # Game-specific input (only when live)
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if game.game_over:
                     continue
-                cell = GameClient.click_to_cell(*event.pos)
+                cell = renderer.pixel_to_cell(*event.pos)
                 if cell is None:
                     game.deselect()
                     continue
@@ -538,7 +584,14 @@ def run_online(screen, net, my_player, initial_state):
                     net.send_move(move)
 
         # ── Draw ────────────────────────────────────────────────────
-        renderer.draw(game)
+        renderer.flipped = orient.flipped
+        if hist.is_live:
+            display = game
+        else:
+            display = _HistoryView(hist.current(), game)
+        renderer.draw(display)
+        draw_command_panel(screen, hist, game.is_my_turn)
+        pygame.display.flip()
         clock.tick(30)
 
 
@@ -557,6 +610,7 @@ def main():
     running = True
     while running:
         renderer.draw(game)
+        pygame.display.flip()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -569,11 +623,13 @@ def main():
                     game.reset()
                 elif event.key == pygame.K_u:
                     game.undo()
+                elif event.key == pygame.K_f:
+                    renderer.flipped = not renderer.flipped
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if game.game_over:
                     continue
-                cell = GameClient.click_to_cell(*event.pos)
+                cell = renderer.pixel_to_cell(*event.pos)
                 if cell is None:
                     game.deselect()
                     continue

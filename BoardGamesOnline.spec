@@ -78,6 +78,7 @@ a = Analysis(
         'client.main',
         'client.lobby',
         'client.network',
+        'client.shared',
 
         # Third-party packages that PyInstaller sometimes misses
         'websocket',
