@@ -1,0 +1,25 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual / conda environments
+.venv/
+venv/
+env/
+.conda/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Egg metadata
+*.egg-info/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# pytest
+.pytest_cache/
