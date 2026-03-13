@@ -1,0 +1,55 @@
+# Build a standalone Windows .exe of the Board Games Online client.
+#
+# This workflow runs only when triggered manually from the GitHub Actions tab
+# (Actions → Build Windows .exe → Run workflow).  It does NOT run on push or PR.
+#
+# The resulting BoardGamesOnline.exe is uploaded as a downloadable artifact
+# that you can grab from the workflow run's summary page.
+
+name: Build Windows .exe
+
+on:
+  # Manual trigger only — click "Run workflow" in the Actions tab.
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      # ── 1. Check out the repository ─────────────────────────────────
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python 3.11 (matches the dev environment) ─────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ── 3. Install runtime dependencies from requirements.txt ───────
+      # This installs pygame, numpy, and websocket-client — everything
+      # the client needs at runtime.
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── 4. Install PyInstaller ──────────────────────────────────────
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      # ── 5. Build the .exe using the spec file ──────────────────────
+      # BoardGamesOnline.spec is at the repository root.  It references
+      # build_exe.py (the entry point) and pyinstaller_imports.py (the
+      # hidden imports file), both also at the root.  The spec bundles
+      # everything into a single .exe in the dist/ folder.
+      - name: Build .exe with PyInstaller
+        run: pyinstaller BoardGamesOnline.spec
+
+      # ── 6. Upload the .exe as a downloadable artifact ───────────────
+      # After the workflow completes, go to the run's summary page and
+      # download "BoardGamesOnline" from the Artifacts section.
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoardGamesOnline
+          path: dist/BoardGamesOnline.exe

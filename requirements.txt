@@ -1,0 +1,9 @@
+# Runtime dependencies for the Board Games Online client.
+# Install with:  pip install -r requirements.txt
+#
+# Server-only packages (fastapi, uvicorn) and testing packages (pytest)
+# are intentionally excluded — this file is for building the client .exe.
+
+pygame>=2.1
+numpy>=1.21
+websocket-client>=1.0
