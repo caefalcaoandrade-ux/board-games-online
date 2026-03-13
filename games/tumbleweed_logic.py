@@ -26,7 +26,7 @@ except ImportError:
 
 # ── Constants (exported for display module) ──────────────────────────────────
 
-BOARD_SIZE = 8          # hex-hex edge length (8 -> 169 cells)
+BOARD_SIZE = 9          # hex-hex edge length (9 -> 217 cells)
 RED = 1
 WHITE = 2
 NEUTRAL = 3

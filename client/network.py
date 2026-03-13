@@ -24,10 +24,33 @@ Typical usage inside a Pygame display module::
 """
 
 import json
+import os
 import queue
+import ssl
+import sys
 import threading
 
+import certifi
 import websocket  # websocket-client package
+
+
+def _build_ssl_context():
+    """Build an SSL context with proper CA certificates.
+
+    Handles both normal Python environments and PyInstaller bundles where
+    the system CA store is unavailable.
+    """
+    cafile = certifi.where()
+
+    # In a PyInstaller bundle, certifi.where() may resolve to a path that
+    # does not exist inside the temporary extraction directory.  Fall back
+    # to the location where the spec file places cacert.pem.
+    if not os.path.exists(cafile) and getattr(sys, "_MEIPASS", None):
+        bundled = os.path.join(sys._MEIPASS, "certifi", "cacert.pem")
+        if os.path.exists(bundled):
+            cafile = bundled
+
+    return ssl.create_default_context(cafile=cafile)
 
 
 class NetworkClient:
@@ -84,8 +107,17 @@ class NetworkClient:
             on_error=self._on_error,
             on_close=self._on_close,
         )
+
+        # For wss:// (secure WebSocket) connections, supply an SSL context
+        # that uses certifi's CA bundle.  This is required inside PyInstaller
+        # bundles where the OS certificate store is not accessible.
+        run_kwargs: dict = {}
+        if self.url.startswith("wss://"):
+            run_kwargs["sslopt"] = {"context": _build_ssl_context()}
+
         self._thread = threading.Thread(
             target=self._ws.run_forever,
+            kwargs=run_kwargs,
             daemon=True,
         )
         self._thread.start()

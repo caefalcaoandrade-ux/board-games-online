@@ -7,3 +7,4 @@
 pygame>=2.1
 numpy>=1.21
 websocket-client>=1.0
+certifi>=2023.0

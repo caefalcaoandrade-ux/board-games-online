@@ -31,7 +31,7 @@ except ImportError:
 # ── Constants (exported for display module) ──────────────────────────────────
 
 EMPTY, WHITE, BLACK = 0, 1, 2
-DEFAULT_SIZE = 8
+DEFAULT_SIZE = 11
 
 # Six hex directions in axial coordinates (dq, dr)
 DIRS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]

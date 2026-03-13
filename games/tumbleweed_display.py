@@ -31,7 +31,7 @@ except ImportError:
 
 # ── Display Constants ────────────────────────────────────────────────────────
 
-HEX_R = 29          # hex circumradius in pixels
+HEX_R = 27          # hex circumradius in pixels
 WIN_W, WIN_H = 1340, 880
 BOARD_CX = 420      # board centre x
 BOARD_CY = 440      # board centre y

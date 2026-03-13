@@ -40,3 +40,7 @@ import games                          # noqa: F401  (__init__.py with GAME_REGIS
 import client.network                 # noqa: F401
 import client.lobby                   # noqa: F401
 import client.main                    # noqa: F401
+
+# ── SSL / certificate support for wss:// connections ──────────────────────
+import certifi                        # noqa: F401
+import ssl                            # noqa: F401

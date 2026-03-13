@@ -11,6 +11,7 @@
 # console=True to console=False in the EXE section below.
 
 import os
+import certifi
 
 # ── Analysis ──────────────────────────────────────────────────────────────
 # PyInstaller analyses build_exe.py to discover imports.  build_exe.py
@@ -35,6 +36,9 @@ a = Analysis(
     datas=[
         ('games', 'games'),
         ('client', 'client'),
+        # Bundle certifi's CA certificate file so wss:// connections work
+        # inside the PyInstaller .exe (the OS cert store is not available).
+        (certifi.where(), 'certifi'),
     ],
 
     # Explicit hidden imports — every module that is loaded dynamically at
@@ -79,6 +83,11 @@ a = Analysis(
         'websocket',
         'numpy',
         'pygame',
+
+        # SSL / certificate packages needed for wss:// connections
+        'certifi',
+        'ssl',
+        '_ssl',
     ],
 
     hookspath=[],

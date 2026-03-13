@@ -1172,10 +1172,10 @@ from games.tumbleweed_logic import (
 )
 
 
-def test_tumbleweed_board_169_cells():
-    """§2: Hexhex-8 has 169 cells."""
+def test_tumbleweed_board_217_cells():
+    """§2: Hexhex-9 has 217 cells."""
     cells = _all_cells()
-    assert len(cells) == 169
+    assert len(cells) == 217
 
 
 def test_tumbleweed_initial_neutral_at_center():
