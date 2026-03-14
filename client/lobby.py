@@ -31,6 +31,12 @@ import pygame
 
 from client.network import NetworkClient
 from games import list_games
+from client.rules import (
+    rules_file_for as _rules_file_for,
+    run_rules_viewer as _run_rules_viewer,
+    draw_help_icon as _draw_help_icon,
+    HELP_SZ as _HELP_SZ,
+)
 
 # ── Layout / palette ─────────────────────────────────────────────────────────
 
@@ -248,6 +254,7 @@ def run_lobby(server_url: str = "ws://localhost:8000/ws"):
 
             clip = pygame.Rect(lx - 2, G_TOP, G_W + 4, G_BOT - G_TOP)
             screen.set_clip(clip)
+            help_clicked_game = None
             for gi, gname in enumerate(games):
                 gy = G_TOP + gi * G_STEP - game_scroll
                 r = pygame.Rect(lx, gy, G_W, G_ITEM_H)
@@ -259,8 +266,19 @@ def run_lobby(server_url: str = "ws://localhost:8000/ws"):
                 else:
                     pygame.draw.rect(screen, ITEM_BG, r, border_radius=4)
                 screen.blit(f_item.render(gname, True, TXT), (lx + 12, gy + 8))
-                if hov and clicked:
-                    selected_game = gname
+                # Help icon
+                hx = lx + G_W - _HELP_SZ - 8
+                hy = gy + (G_ITEM_H - _HELP_SZ) // 2
+                if _rules_file_for(gname):
+                    h_hov = _draw_help_icon(screen, f_small, hx, hy,
+                                            mx, my, clip)
+                    if h_hov and clicked:
+                        help_clicked_game = gname
+                    elif hov and clicked and not h_hov:
+                        selected_game = gname
+                else:
+                    if hov and clicked:
+                        selected_game = gname
             screen.set_clip(None)
 
             # Scroll indicators
@@ -272,6 +290,10 @@ def run_lobby(server_url: str = "ws://localhost:8000/ws"):
             if game_scroll < g_max:
                 a = f_small.render("\u25bc more", True, arrow_col)
                 screen.blit(a, (acx - a.get_width() // 2, G_BOT + 2))
+
+            if help_clicked_game:
+                lobby_fonts = (f_title, f_head, f_btn, f_small)
+                _run_rules_viewer(screen, lobby_fonts, help_clicked_game)
 
             # ── right column: create / join ──────────────────────────
             rx, ry = 320, 60
@@ -388,6 +410,7 @@ def _load_dispatch():
     from games.bashni_display import run_online as bashni_online
     from games.entrapment_display import run_online as entrapment_online
     from games.havannah_display import run_online as havannah_online
+    from games.hive_display import run_online as hive_online
     from games.hnefatafl_display import run_online as hnefatafl_online
     from games.shobu_display import run_online as shobu_online
     from games.tumbleweed_display import run_online as tumbleweed_online
@@ -400,6 +423,7 @@ def _load_dispatch():
     _ONLINE_DISPATCH["Bashni"] = bashni_online
     _ONLINE_DISPATCH["Entrapment"] = entrapment_online
     _ONLINE_DISPATCH["Havannah"] = havannah_online
+    _ONLINE_DISPATCH["Hive"] = hive_online
     _ONLINE_DISPATCH["Hnefatafl"] = hnefatafl_online
     _ONLINE_DISPATCH["Shobu"] = shobu_online
     _ONLINE_DISPATCH["Tumbleweed"] = tumbleweed_online

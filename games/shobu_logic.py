@@ -325,7 +325,8 @@ class ShobuLogic(AbstractBoardGame):
         return state["turn"]
 
     def _get_legal_moves(self, state, player):
-        boards = state["boards"]
+        # Work on a copy so we never mutate the original state
+        boards = [[row[:] for row in b] for b in state["boards"]]
         moves = []
         for pb in HOME[player]:
             for fr in range(4):
@@ -486,13 +487,9 @@ class ShobuLogic(AbstractBoardGame):
         if ad != d or adist != dist:
             return False
 
-        # Apply passive move temporarily, then check aggressive legality
-        boards[pb][pf[0]][pf[1]] = EMPTY
-        boards[pb][pt[0]][pt[1]] = player
-        try:
-            result = _aggr_legal(boards, player, ab, af[0], af[1], d, dist)
-        finally:
-            boards[pb][pt[0]][pt[1]] = EMPTY
-            boards[pb][pf[0]][pf[1]] = player
+        # Apply passive move on a copy, then check aggressive legality
+        tmp = [[row[:] for row in b] for b in boards]
+        tmp[pb][pf[0]][pf[1]] = EMPTY
+        tmp[pb][pt[0]][pt[1]] = player
 
-        return result
+        return _aggr_legal(tmp, player, ab, af[0], af[1], d, dist)

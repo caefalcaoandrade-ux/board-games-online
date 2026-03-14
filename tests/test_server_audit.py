@@ -460,3 +460,18 @@ def test_rapid_valid_moves_no_drops():
             msg = ws.receive_json()
             assert msg["type"] == "error"
             assert "unknown" in msg["message"].lower()
+
+
+def test_join_room_while_already_in_room():
+    """A player already in a room cannot join another room."""
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "create_room", "game": "Bashni"})
+        created = ws.receive_json()
+        assert created["type"] == "room_created"
+
+        # Try joining a different room
+        ws.send_json({"type": "join_room", "code": "ZZZZ"})
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "Already in a room" in msg["message"]

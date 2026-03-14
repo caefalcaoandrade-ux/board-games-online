@@ -10,7 +10,7 @@ response as a ``move_made`` (or ``game_over``) message via
 Usage::
 
     from client.bot_game import run_vs_bot
-    run_vs_bot(screen, "Havannah", "hard")
+    run_vs_bot(screen, "Havannah", "strong")
 """
 
 import sys
@@ -24,6 +24,7 @@ if _project_root not in sys.path:
 
 from games import create_game
 from client.bot import MCTSBot
+from client.claude_bot import ClaudeBot
 
 
 class BotNetAdapter:
@@ -46,6 +47,7 @@ class BotNetAdapter:
         self._bot_result = {}
         self._move_time = time.monotonic()
         self._min_delay = 0.5  # seconds before bot move appears
+        self._fallback_notified = False
 
         # If bot goes first, start thinking immediately
         self._maybe_start_bot()
@@ -80,6 +82,16 @@ class BotNetAdapter:
         """Return pending messages — including bot moves once ready."""
         msgs = list(self._queue)
         self._queue.clear()
+
+        # Detect Claude->MCTS fallback swap and notify display once
+        if (not self._fallback_notified
+                and hasattr(self.bot, "switched_to_fallback")
+                and self.bot.switched_to_fallback):
+            self._fallback_notified = True
+            msgs.append({
+                "type": "error",
+                "message": "AI unavailable \u2014 switching to Strong bot",
+            })
 
         # Check if bot finished thinking
         if self._thinking and "move" in self._bot_result:
@@ -152,7 +164,7 @@ class BotNetAdapter:
 
 
 def run_vs_bot(screen, game_name, difficulty):
-    """Launch a single-player game against the MCTS bot.
+    """Launch a single-player game against a bot.
 
     Parameters
     ----------
@@ -161,7 +173,7 @@ def run_vs_bot(screen, game_name, difficulty):
     game_name : str
         Name of the game (must be in the registry).
     difficulty : str
-        "easy", "medium", or "hard".
+        "weak", "strong", or "expert".
 
     Returns when the game ends or the user closes the window.
     """
@@ -169,7 +181,10 @@ def run_vs_bot(screen, game_name, difficulty):
     from client.lobby import _load_dispatch, _ONLINE_DISPATCH
 
     logic = create_game(game_name)
-    bot = MCTSBot(difficulty)
+    if difficulty == "expert":
+        bot = ClaudeBot()
+    else:
+        bot = MCTSBot(difficulty)
     human_player = 1  # human is always player 1
 
     adapter = BotNetAdapter(logic, bot, human_player)

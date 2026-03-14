@@ -28,6 +28,7 @@ a = Analysis(
         ('games', 'games'),
         ('client', 'client'),
         ('server', 'server'),
+        ('rules', 'rules'),
         # Bundle certifi's CA certificate file so wss:// connections work
         # inside the PyInstaller .exe (the OS cert store is not available).
         (certifi.where(), 'certifi'),

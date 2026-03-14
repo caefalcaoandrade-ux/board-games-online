@@ -19,3 +19,6 @@ websockets>=12.0
 
 # ngrok tunnel (for hosting over the internet)
 pyngrok>=7.0
+
+# Claude API bot (optional — requires API key)
+anthropic>=0.39

@@ -49,6 +49,14 @@ _GOLD     = (228, 192, 56)
 
 WIN_W, WIN_H = 580, 400
 
+# ── Rules viewer (in client.rules to avoid circular import with lobby) ────
+from client.rules import (
+    rules_file_for as _rules_file_for,
+    run_rules_viewer as _run_rules_viewer,
+    draw_help_icon as _draw_help_icon,
+    HELP_SZ as _HELP_SZ,
+)
+
 
 # ── Cross-platform clipboard ─────────────────────────────────────────────
 
@@ -649,6 +657,7 @@ def _run_local_setup(screen, fonts):
         clip = pygame.Rect(LIST_X - 2, LIST_TOP, LIST_W + 4,
                            LIST_BOT - LIST_TOP)
         screen.set_clip(clip)
+        help_clicked_game = None
         for i, gname in enumerate(games):
             iy = LIST_TOP + i * STEP - scroll
             r = pygame.Rect(LIST_X, iy, LIST_W, ITEM_H)
@@ -661,12 +670,25 @@ def _run_local_setup(screen, fonts):
                 pygame.draw.rect(screen, _ITEM_BG, r, border_radius=4)
             screen.blit(f_small.render(gname, True, _TXT),
                         (LIST_X + 10, iy + 7))
-            if hov and clicked:
-                selected_game = gname
+            # Help icon
+            hx = LIST_X + LIST_W - _HELP_SZ - 6
+            hy = iy + (ITEM_H - _HELP_SZ) // 2
+            if _rules_file_for(gname):
+                h_hov = _draw_help_icon(screen, f_small, hx, hy, mx, my, clip)
+                if h_hov and clicked:
+                    help_clicked_game = gname
+                elif hov and clicked and not h_hov:
+                    selected_game = gname
+            else:
+                if hov and clicked:
+                    selected_game = gname
         screen.set_clip(None)
 
         _draw_scroll_arrows(screen, f_small, LIST_X, LIST_W,
                             LIST_TOP, LIST_BOT, scroll, max_scroll)
+
+        if help_clicked_game:
+            _run_rules_viewer(screen, fonts, help_clicked_game)
 
         # ── Start button (fixed) ──────────────────────────────────────
         btn_start = pygame.Rect(WIN_W // 2 - 80, WIN_H - 76, 160, 44)
@@ -707,6 +729,123 @@ def _launch_local_game(game_name):
         pygame.init()
 
 
+# ── Screen: API Key Input (for Expert / Claude AI bot) ───────────────────
+
+
+def _run_api_key_screen(screen, fonts):
+    """Ask user to paste their Anthropic API key.  Returns True on save, None on back."""
+    clock = pygame.time.Clock()
+    f_title, f_sub, f_btn, f_small = fonts
+    f_input = pygame.font.SysFont("courier", 20)
+
+    key_text = ""
+    input_active = True
+    error_msg = ""
+    error_ttl = 0
+
+    while True:
+        mx, my = pygame.mouse.get_pos()
+        clicked = False
+
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                return None
+            if ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_ESCAPE:
+                    return None
+                if input_active:
+                    if ev.key == pygame.K_BACKSPACE:
+                        key_text = key_text[:-1]
+                    elif ev.key == pygame.K_RETURN and key_text.strip():
+                        from client.claude_bot import save_api_key
+                        try:
+                            save_api_key(key_text.strip())
+                            return True
+                        except Exception as exc:
+                            error_msg = str(exc)
+                            error_ttl = 300
+                    elif _is_paste(ev):
+                        pasted = _clipboard_get()
+                        if pasted:
+                            key_text += pasted
+                    elif ev.unicode and ev.unicode.isprintable():
+                        key_text += ev.unicode
+            if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                clicked = True
+
+        screen.fill(_BG)
+
+        # Title
+        t = f_title.render("Claude AI Setup", True, _TXT)
+        screen.blit(t, (WIN_W // 2 - t.get_width() // 2, 20))
+
+        # Instructions
+        lines = [
+            "Expert mode uses Claude AI for stronger play.",
+            "You need an Anthropic API key.",
+            "1. Go to console.anthropic.com",
+            "2. Create an account and generate an API key",
+            "3. Paste it below and click Save",
+        ]
+        y = 65
+        for line in lines:
+            s = f_small.render(line, True, _TXT_DIM)
+            screen.blit(s, (WIN_W // 2 - s.get_width() // 2, y))
+            y += 22
+
+        # Label
+        lbl = f_sub.render("API Key:", True, _TXT_DIM)
+        screen.blit(lbl, (WIN_W // 2 - 230, 188))
+
+        # Input box
+        ir = pygame.Rect(WIN_W // 2 - 230, 210, 460, 38)
+        bd = _INPUT_AC if input_active else _INPUT_BD
+        pygame.draw.rect(screen, _INPUT_BG, ir, border_radius=5)
+        pygame.draw.rect(screen, bd, ir, 2, border_radius=5)
+
+        # Mask the key for privacy (show first 8 chars + dots)
+        if len(key_text) > 12:
+            display_text = key_text[:8] + "..." + key_text[-4:]
+        else:
+            display_text = key_text
+        key_surf = f_input.render(display_text, True, _TXT)
+        text_area = ir.inflate(-16, 0)
+        scroll_x = max(0, key_surf.get_width() - text_area.width)
+
+        screen.set_clip(text_area)
+        screen.blit(key_surf, (text_area.x - scroll_x, ir.y + 8))
+        screen.set_clip(None)
+
+        if input_active and (pygame.time.get_ticks() // 500) % 2 == 0:
+            vis_w = min(key_surf.get_width(), text_area.width)
+            cx = text_area.x + vis_w + 1
+            pygame.draw.line(screen, _TXT, (cx, ir.y + 8), (cx, ir.y + 30), 2)
+
+        # Save button
+        btn_save = pygame.Rect(WIN_W // 2 - 80, 268, 160, 40)
+        can_save = len(key_text.strip()) > 0
+        save_hover = _draw_btn(screen, btn_save, "Save", f_btn, mx, my, can_save)
+        if clicked and save_hover and can_save:
+            from client.claude_bot import save_api_key
+            try:
+                save_api_key(key_text.strip())
+                return True
+            except Exception as exc:
+                error_msg = str(exc)
+                error_ttl = 300
+
+        # Back hint
+        bk = f_small.render("Esc to go back", True, (70, 68, 75))
+        screen.blit(bk, (WIN_W // 2 - bk.get_width() // 2, 320))
+
+        if error_ttl > 0:
+            error_ttl -= 1
+        _draw_error(screen, f_small, error_msg, error_ttl, WIN_W, WIN_H)
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
 # ── Screen: Bot Setup (game + difficulty selection) ──────────────────────
 
 
@@ -722,14 +861,14 @@ def _run_bot_setup(screen, fonts):
 
     games = list_games()
     selected_game = None
-    selected_diff = "medium"
+    selected_diff = "strong"
     scroll = 0
-    diffs = ["easy", "medium", "hard"]
-    diff_labels = {"easy": "Easy", "medium": "Medium", "hard": "Hard"}
+    diffs = ["weak", "strong", "expert"]
+    diff_labels = {"weak": "Weak", "strong": "Strong", "expert": "Expert"}
     diff_colors = {
-        "easy":   (90, 180, 90),
-        "medium": (200, 170, 50),
-        "hard":   (200, 70, 70),
+        "weak":   (90, 180, 90),
+        "strong": (200, 70, 70),
+        "expert": (228, 192, 56),
     }
 
     _ITEM_BG  = (52, 48, 58)
@@ -771,6 +910,7 @@ def _run_bot_setup(screen, fonts):
         clip = pygame.Rect(LIST_X - 2, LIST_TOP, LIST_W + 4,
                            LIST_BOT - LIST_TOP)
         screen.set_clip(clip)
+        help_clicked_game = None
         for i, gname in enumerate(games):
             iy = LIST_TOP + i * STEP - scroll
             r = pygame.Rect(LIST_X, iy, LIST_W, ITEM_H)
@@ -783,12 +923,25 @@ def _run_bot_setup(screen, fonts):
                 pygame.draw.rect(screen, _ITEM_BG, r, border_radius=4)
             screen.blit(f_small.render(gname, True, _TXT),
                         (LIST_X + 10, iy + 7))
-            if hov and clicked:
-                selected_game = gname
+            # Help icon
+            hx = LIST_X + LIST_W - _HELP_SZ - 6
+            hy = iy + (ITEM_H - _HELP_SZ) // 2
+            if _rules_file_for(gname):
+                h_hov = _draw_help_icon(screen, f_small, hx, hy, mx, my, clip)
+                if h_hov and clicked:
+                    help_clicked_game = gname
+                elif hov and clicked and not h_hov:
+                    selected_game = gname
+            else:
+                if hov and clicked:
+                    selected_game = gname
         screen.set_clip(None)
 
         _draw_scroll_arrows(screen, f_small, LIST_X, LIST_W,
                             LIST_TOP, LIST_BOT, scroll, max_scroll)
+
+        if help_clicked_game:
+            _run_rules_viewer(screen, fonts, help_clicked_game)
 
         # ── Right column: difficulty (fixed) ──────────────────────────
         rx, ry = 310, 55
@@ -812,9 +965,9 @@ def _run_bot_setup(screen, fonts):
 
         ry += 6
         desc = {
-            "easy": "Fast, makes mistakes",
-            "medium": "Moderate thinking time",
-            "hard": "Thinks several seconds",
+            "weak": "Random play (instant)",
+            "strong": "Strongest play (8 s)",
+            "expert": "Claude AI (requires API key)",
         }
         dt = f_small.render(desc[selected_diff], True, _TXT_DIM)
         screen.blit(dt, (rx, ry))
@@ -1036,6 +1189,15 @@ def main():
                 if result is None:
                     continue  # back to menu
                 game_name, difficulty = result
+
+                # Expert requires API key
+                if difficulty == "expert":
+                    from client.claude_bot import needs_api_key
+                    if needs_api_key():
+                        key_result = _run_api_key_screen(screen, fonts)
+                        if key_result is None:
+                            continue  # back to menu
+
                 from client.bot_game import run_vs_bot
                 run_vs_bot(screen, game_name, difficulty)
                 screen = pygame.display.set_mode((WIN_W, WIN_H))

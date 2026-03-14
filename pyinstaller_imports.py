@@ -21,6 +21,7 @@ import games.bao_logic                # noqa: F401
 import games.bashni_logic             # noqa: F401
 import games.entrapment_logic         # noqa: F401
 import games.havannah_logic           # noqa: F401
+import games.hive_logic               # noqa: F401
 import games.hnefatafl_logic          # noqa: F401
 import games.shobu_logic              # noqa: F401
 import games.tumbleweed_logic         # noqa: F401
@@ -35,6 +36,7 @@ import games.bao_display              # noqa: F401
 import games.bashni_display           # noqa: F401
 import games.entrapment_display       # noqa: F401
 import games.havannah_display         # noqa: F401
+import games.hive_display             # noqa: F401
 import games.hnefatafl_display        # noqa: F401
 import games.shobu_display            # noqa: F401
 import games.tumbleweed_display       # noqa: F401
@@ -48,9 +50,11 @@ import client.network                 # noqa: F401
 import client.lobby                   # noqa: F401
 import client.main                    # noqa: F401
 import client.shared                  # noqa: F401
+import client.rules                   # noqa: F401
 import client.host                    # noqa: F401
 import client.bot                     # noqa: F401
 import client.bot_game                # noqa: F401
+import client.claude_bot              # noqa: F401
 
 # ── Server (embedded for self-hosting) ───────────────────────────────────
 import server.main                    # noqa: F401

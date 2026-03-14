@@ -11,6 +11,7 @@ from games.bao_logic import BaoGame
 from games.bashni_logic import BashniLogic
 from games.entrapment_logic import EntrapmentLogic
 from games.havannah_logic import HavannahLogic
+from games.hive_logic import HiveLogic
 from games.hnefatafl_logic import HnefataflLogic
 from games.shobu_logic import ShobuLogic
 from games.tumbleweed_logic import TumbleweedLogic
@@ -30,6 +31,7 @@ GAME_REGISTRY: dict[str, type] = {
     "Bashni": BashniLogic,
     "Entrapment": EntrapmentLogic,
     "Havannah": HavannahLogic,
+    "Hive": HiveLogic,
     "Hnefatafl": HnefataflLogic,
     "Shobu": ShobuLogic,
     "Tumbleweed": TumbleweedLogic,

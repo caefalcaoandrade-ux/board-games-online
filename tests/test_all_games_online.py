@@ -44,6 +44,7 @@ DISPLAY_MODULES = {
     "Bashni": "bashni_display",
     "Entrapment": "entrapment_display",
     "Havannah": "havannah_display",
+    "Hive": "hive_display",
     "Hnefatafl": "hnefatafl_display",
     "Shobu": "shobu_display",
     "Tumbleweed": "tumbleweed_display",
