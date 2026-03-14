@@ -98,6 +98,7 @@ def run_lobby(server_url: str = "ws://localhost:8000/ws"):
     # State
     games = list_games()
     selected_game: str | None = None
+    game_scroll = 0
     code_input = ""
     input_active = False
     error_msg = ""
@@ -143,6 +144,13 @@ def run_lobby(server_url: str = "ws://localhost:8000/ws"):
 
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 clicked = True
+
+            elif ev.type == pygame.MOUSEWHEEL and phase == PH_PICK:
+                _GSTEP = 38
+                _GTOTAL = len(games) * _GSTEP - 4
+                _GVIS = WIN_H - 180 - 90
+                _GMAX = max(0, _GTOTAL - _GVIS)
+                game_scroll = max(0, min(_GMAX, game_scroll - ev.y * _GSTEP))
 
             elif ev.type == pygame.KEYDOWN and phase == PH_PICK:
                 if input_active:
@@ -224,24 +232,46 @@ def run_lobby(server_url: str = "ws://localhost:8000/ws"):
             t = f_title.render("Board Games Online", True, TXT)
             screen.blit(t, (WIN_W // 2 - t.get_width() // 2, 16))
 
-            # ── left column: game list ───────────────────────────────
-            lx, ly = 24, 60
+            # ── left column: scrollable game list ──────────────────────
+            lx = 24
             h = f_head.render("Select a Game", True, TXT_DIM)
-            screen.blit(h, (lx, ly)); ly += 30
+            screen.blit(h, (lx, 60))
 
-            for gname in games:
-                r = pygame.Rect(lx, ly, 260, 34)
-                hov = r.collidepoint(mx, my)
+            G_ITEM_H, G_GAP = 34, 4
+            G_STEP = G_ITEM_H + G_GAP
+            G_TOP = 90
+            G_BOT = WIN_H - 90
+            G_W = 260
+            g_total = len(games) * G_STEP - G_GAP
+            g_max = max(0, g_total - (G_BOT - G_TOP))
+            game_scroll = max(0, min(g_max, game_scroll))
+
+            clip = pygame.Rect(lx - 2, G_TOP, G_W + 4, G_BOT - G_TOP)
+            screen.set_clip(clip)
+            for gi, gname in enumerate(games):
+                gy = G_TOP + gi * G_STEP - game_scroll
+                r = pygame.Rect(lx, gy, G_W, G_ITEM_H)
+                hov = r.collidepoint(mx, my) and clip.collidepoint(mx, my)
                 if gname == selected_game:
                     pygame.draw.rect(screen, ITEM_SEL, r, border_radius=4)
                 elif hov:
                     pygame.draw.rect(screen, ITEM_HOV, r, border_radius=4)
                 else:
                     pygame.draw.rect(screen, ITEM_BG, r, border_radius=4)
-                screen.blit(f_item.render(gname, True, TXT), (lx + 12, ly + 8))
+                screen.blit(f_item.render(gname, True, TXT), (lx + 12, gy + 8))
                 if hov and clicked:
                     selected_game = gname
-                ly += 38
+            screen.set_clip(None)
+
+            # Scroll indicators
+            arrow_col = (100, 100, 110)
+            acx = lx + G_W // 2
+            if game_scroll > 0:
+                a = f_small.render("\u25b2 more", True, arrow_col)
+                screen.blit(a, (acx - a.get_width() // 2, G_TOP - 17))
+            if game_scroll < g_max:
+                a = f_small.render("\u25bc more", True, arrow_col)
+                screen.blit(a, (acx - a.get_width() // 2, G_BOT + 2))
 
             # ── right column: create / join ──────────────────────────
             rx, ry = 320, 60

@@ -586,6 +586,19 @@ def _run_hosting_screen(screen, fonts):
 # ── Screen: Local Game Selection ─────────────────────────────────────────
 
 
+def _draw_scroll_arrows(screen, font, lx, item_w, top_y, bottom_y,
+                        scroll, max_scroll):
+    """Draw ▲/▼ indicators when the game list is scrollable."""
+    col = (100, 100, 110)
+    cx = lx + item_w // 2
+    if scroll > 0:
+        a = font.render("\u25b2 more", True, col)
+        screen.blit(a, (cx - a.get_width() // 2, top_y - 17))
+    if scroll < max_scroll:
+        a = font.render("\u25bc more", True, col)
+        screen.blit(a, (cx - a.get_width() // 2, bottom_y + 2))
+
+
 def _run_local_setup(screen, fonts):
     """Game selection for local hotseat play.  Returns game_name or None."""
     from games import list_games
@@ -594,10 +607,20 @@ def _run_local_setup(screen, fonts):
     f_title, f_sub, f_btn, f_small = fonts
     games = list_games()
     selected_game = None
+    scroll = 0
 
     _ITEM_BG  = (52, 48, 58)
     _ITEM_HOV = (62, 58, 68)
     _ITEM_SEL = (45, 100, 180)
+
+    ITEM_H, ITEM_GAP = 30, 4
+    STEP = ITEM_H + ITEM_GAP
+    LIST_X = WIN_W // 2 - 130
+    LIST_W = 260
+    LIST_TOP = 113
+    LIST_BOT = WIN_H - 90
+    total = len(games) * STEP - ITEM_GAP
+    max_scroll = max(0, total - (LIST_BOT - LIST_TOP))
 
     while True:
         mx, my = pygame.mouse.get_pos()
@@ -610,38 +633,43 @@ def _run_local_setup(screen, fonts):
                 return None
             if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 clicked = True
+            if ev.type == pygame.MOUSEWHEEL:
+                scroll = max(0, min(max_scroll, scroll - ev.y * STEP))
 
         screen.fill(_BG)
 
         t = f_title.render("Play Locally", True, _TXT)
         screen.blit(t, (WIN_W // 2 - t.get_width() // 2, 20))
-
         sub = f_small.render("Two players, same computer", True, _TXT_DIM)
         screen.blit(sub, (WIN_W // 2 - sub.get_width() // 2, 54))
-
-        # Game list — centred
-        lx = WIN_W // 2 - 130
-        ly = 85
         h = f_sub.render("Select a Game", True, _TXT_DIM)
-        screen.blit(h, (WIN_W // 2 - h.get_width() // 2, ly))
-        ly += 28
+        screen.blit(h, (WIN_W // 2 - h.get_width() // 2, 85))
 
-        for gname in games:
-            r = pygame.Rect(lx, ly, 260, 30)
-            hov = r.collidepoint(mx, my)
+        # ── Scrollable game list ──────────────────────────────────────
+        clip = pygame.Rect(LIST_X - 2, LIST_TOP, LIST_W + 4,
+                           LIST_BOT - LIST_TOP)
+        screen.set_clip(clip)
+        for i, gname in enumerate(games):
+            iy = LIST_TOP + i * STEP - scroll
+            r = pygame.Rect(LIST_X, iy, LIST_W, ITEM_H)
+            hov = r.collidepoint(mx, my) and clip.collidepoint(mx, my)
             if gname == selected_game:
                 pygame.draw.rect(screen, _ITEM_SEL, r, border_radius=4)
             elif hov:
                 pygame.draw.rect(screen, _ITEM_HOV, r, border_radius=4)
             else:
                 pygame.draw.rect(screen, _ITEM_BG, r, border_radius=4)
-            screen.blit(f_small.render(gname, True, _TXT), (lx + 10, ly + 7))
+            screen.blit(f_small.render(gname, True, _TXT),
+                        (LIST_X + 10, iy + 7))
             if hov and clicked:
                 selected_game = gname
-            ly += 34
+        screen.set_clip(None)
 
-        # Start button
-        btn_start = pygame.Rect(WIN_W // 2 - 80, ly + 10, 160, 44)
+        _draw_scroll_arrows(screen, f_small, LIST_X, LIST_W,
+                            LIST_TOP, LIST_BOT, scroll, max_scroll)
+
+        # ── Start button (fixed) ──────────────────────────────────────
+        btn_start = pygame.Rect(WIN_W // 2 - 80, WIN_H - 76, 160, 44)
         can_start = selected_game is not None
         start_hover = btn_start.collidepoint(mx, my) and can_start
         sbg = (_BTN_LOCAL_HOV if start_hover
@@ -695,6 +723,7 @@ def _run_bot_setup(screen, fonts):
     games = list_games()
     selected_game = None
     selected_diff = "medium"
+    scroll = 0
     diffs = ["easy", "medium", "hard"]
     diff_labels = {"easy": "Easy", "medium": "Medium", "hard": "Hard"}
     diff_colors = {
@@ -707,6 +736,14 @@ def _run_bot_setup(screen, fonts):
     _ITEM_HOV = (62, 58, 68)
     _ITEM_SEL = (45, 100, 180)
 
+    ITEM_H, ITEM_GAP = 30, 4
+    STEP = ITEM_H + ITEM_GAP
+    LIST_X, LIST_W = 24, 250
+    LIST_TOP = 83
+    LIST_BOT = WIN_H - 45
+    total = len(games) * STEP - ITEM_GAP
+    max_scroll = max(0, total - (LIST_BOT - LIST_TOP))
+
     while True:
         mx, my = pygame.mouse.get_pos()
         clicked = False
@@ -718,6 +755,8 @@ def _run_bot_setup(screen, fonts):
                 return None
             if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 clicked = True
+            if ev.type == pygame.MOUSEWHEEL:
+                scroll = max(0, min(max_scroll, scroll - ev.y * STEP))
 
         screen.fill(_BG)
 
@@ -725,27 +764,33 @@ def _run_bot_setup(screen, fonts):
         t = f_title.render("Play vs Bot", True, _TXT)
         screen.blit(t, (WIN_W // 2 - t.get_width() // 2, 16))
 
-        # ── Left column: game list ────────────────────────────────────
-        lx, ly = 24, 55
+        # ── Left column: scrollable game list ─────────────────────────
         h = f_sub.render("Select a Game", True, _TXT_DIM)
-        screen.blit(h, (lx, ly))
-        ly += 28
+        screen.blit(h, (LIST_X, 55))
 
-        for gname in games:
-            r = pygame.Rect(lx, ly, 250, 30)
-            hov = r.collidepoint(mx, my)
+        clip = pygame.Rect(LIST_X - 2, LIST_TOP, LIST_W + 4,
+                           LIST_BOT - LIST_TOP)
+        screen.set_clip(clip)
+        for i, gname in enumerate(games):
+            iy = LIST_TOP + i * STEP - scroll
+            r = pygame.Rect(LIST_X, iy, LIST_W, ITEM_H)
+            hov = r.collidepoint(mx, my) and clip.collidepoint(mx, my)
             if gname == selected_game:
                 pygame.draw.rect(screen, _ITEM_SEL, r, border_radius=4)
             elif hov:
                 pygame.draw.rect(screen, _ITEM_HOV, r, border_radius=4)
             else:
                 pygame.draw.rect(screen, _ITEM_BG, r, border_radius=4)
-            screen.blit(f_small.render(gname, True, _TXT), (lx + 10, ly + 7))
+            screen.blit(f_small.render(gname, True, _TXT),
+                        (LIST_X + 10, iy + 7))
             if hov and clicked:
                 selected_game = gname
-            ly += 34
+        screen.set_clip(None)
 
-        # ── Right column: difficulty ──────────────────────────────────
+        _draw_scroll_arrows(screen, f_small, LIST_X, LIST_W,
+                            LIST_TOP, LIST_BOT, scroll, max_scroll)
+
+        # ── Right column: difficulty (fixed) ──────────────────────────
         rx, ry = 310, 55
         screen.blit(f_sub.render("Difficulty", True, _TXT_DIM), (rx, ry))
         ry += 28
@@ -765,7 +810,6 @@ def _run_bot_setup(screen, fonts):
                 selected_diff = d
             ry += 42
 
-        # Difficulty description
         ry += 6
         desc = {
             "easy": "Fast, makes mistakes",
@@ -775,7 +819,7 @@ def _run_bot_setup(screen, fonts):
         dt = f_small.render(desc[selected_diff], True, _TXT_DIM)
         screen.blit(dt, (rx, ry))
 
-        # ── Start button ──────────────────────────────────────────────
+        # ── Start button (fixed) ──────────────────────────────────────
         btn_start = pygame.Rect(rx, ry + 40, 240, 44)
         can_start = selected_game is not None
         start_hover = btn_start.collidepoint(mx, my) and can_start
@@ -788,7 +832,6 @@ def _run_bot_setup(screen, fonts):
         if clicked and start_hover:
             return (selected_game, selected_diff)
 
-        # Back hint
         bk = f_small.render("Esc to go back", True, (70, 68, 75))
         screen.blit(bk, (WIN_W // 2 - bk.get_width() // 2, WIN_H - 28))
 
