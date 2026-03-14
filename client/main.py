@@ -159,13 +159,27 @@ def _draw_error(screen, font, msg, ttl, win_w, win_h):
 # ── Screen 1: Main Menu ──────────────────────────────────────────────────
 
 
+_BTN_BOT     = (130, 80, 170)
+_BTN_BOT_HOV = (150, 100, 195)
+_BTN_LOCAL     = (160, 120, 50)
+_BTN_LOCAL_HOV = (185, 145, 65)
+
+
 def _run_main_menu(screen, fonts):
-    """Show Host / Join buttons.  Returns 'host', 'join', or None (quit)."""
+    """Show four mode buttons.  Returns 'host'|'join'|'local'|'bot'|None."""
     clock = pygame.time.Clock()
     f_title, f_sub, f_btn, f_small = fonts
 
-    btn_host = pygame.Rect(WIN_W // 2 - 170, 160, 150, 60)
-    btn_join = pygame.Rect(WIN_W // 2 + 20,  160, 150, 60)
+    bw, bh = 150, 46
+    row1_y = 145
+    row2_y = 270
+    left_x  = WIN_W // 2 - bw - 10
+    right_x = WIN_W // 2 + 10
+
+    btn_host  = pygame.Rect(left_x,  row1_y, bw, bh)
+    btn_join  = pygame.Rect(right_x, row1_y, bw, bh)
+    btn_local = pygame.Rect(left_x,  row2_y, bw, bh)
+    btn_bot   = pygame.Rect(right_x, row2_y, bw, bh)
 
     while True:
         mx, my = pygame.mouse.get_pos()
@@ -183,39 +197,70 @@ def _run_main_menu(screen, fonts):
 
         # Title
         t = f_title.render("Board Games Online", True, _TXT)
-        screen.blit(t, (WIN_W // 2 - t.get_width() // 2, 40))
+        screen.blit(t, (WIN_W // 2 - t.get_width() // 2, 30))
 
         s = f_small.render("Play abstract board games with a friend", True, _TXT_DIM)
-        screen.blit(s, (WIN_W // 2 - s.get_width() // 2, 80))
+        screen.blit(s, (WIN_W // 2 - s.get_width() // 2, 66))
 
-        # Divider
+        # ── Online section ────────────────────────────────────────────
+        section_y = 100
         pygame.draw.line(screen, (60, 58, 65),
-                         (WIN_W // 2 - 180, 120), (WIN_W // 2 + 180, 120))
-
-        s2 = f_sub.render("Choose how to play:", True, _TXT_DIM)
-        screen.blit(s2, (WIN_W // 2 - s2.get_width() // 2, 132))
+                         (WIN_W // 2 - 180, section_y),
+                         (WIN_W // 2 + 180, section_y))
+        lbl = f_small.render("Online", True, (90, 88, 95))
+        screen.blit(lbl, (WIN_W // 2 - lbl.get_width() // 2, section_y + 4))
 
         # Host button (green)
         h_hover = btn_host.collidepoint(mx, my)
-        hbg = _BTN_HOST_HOV if h_hover else _BTN_HOST
-        pygame.draw.rect(screen, hbg, btn_host, border_radius=8)
+        pygame.draw.rect(screen, _BTN_HOST_HOV if h_hover else _BTN_HOST,
+                         btn_host, border_radius=8)
         hl = f_btn.render("Host Game", True, _TXT_BTN)
         screen.blit(hl, (btn_host.centerx - hl.get_width() // 2,
                          btn_host.centery - hl.get_height() // 2))
 
         # Join button (blue)
         j_hover = btn_join.collidepoint(mx, my)
-        jbg = _BTN_HOV if j_hover else _BTN
-        pygame.draw.rect(screen, jbg, btn_join, border_radius=8)
+        pygame.draw.rect(screen, _BTN_HOV if j_hover else _BTN,
+                         btn_join, border_radius=8)
         jl = f_btn.render("Join Game", True, _TXT_BTN)
         screen.blit(jl, (btn_join.centerx - jl.get_width() // 2,
                          btn_join.centery - jl.get_height() // 2))
 
         # Descriptions
-        hd = f_small.render("Start a server and invite", True, _TXT_DIM)
-        screen.blit(hd, (btn_host.centerx - hd.get_width() // 2, 230))
-        jd = f_small.render("Connect to a friend's game", True, _TXT_DIM)
-        screen.blit(jd, (btn_join.centerx - jd.get_width() // 2, 230))
+        hd = f_small.render("Start server & invite", True, _TXT_DIM)
+        screen.blit(hd, (btn_host.centerx - hd.get_width() // 2, row1_y + bh + 4))
+        jd = f_small.render("Connect to a friend", True, _TXT_DIM)
+        screen.blit(jd, (btn_join.centerx - jd.get_width() // 2, row1_y + bh + 4))
+
+        # ── Offline section ───────────────────────────────────────────
+        section_y2 = 225
+        pygame.draw.line(screen, (60, 58, 65),
+                         (WIN_W // 2 - 180, section_y2),
+                         (WIN_W // 2 + 180, section_y2))
+        lbl2 = f_small.render("Offline", True, (90, 88, 95))
+        screen.blit(lbl2, (WIN_W // 2 - lbl2.get_width() // 2, section_y2 + 4))
+
+        # Local button (golden/olive)
+        l_hover = btn_local.collidepoint(mx, my)
+        pygame.draw.rect(screen, _BTN_LOCAL_HOV if l_hover else _BTN_LOCAL,
+                         btn_local, border_radius=8)
+        ll = f_btn.render("Play Locally", True, _TXT_BTN)
+        screen.blit(ll, (btn_local.centerx - ll.get_width() // 2,
+                         btn_local.centery - ll.get_height() // 2))
+
+        # Bot button (purple)
+        b_hover = btn_bot.collidepoint(mx, my)
+        pygame.draw.rect(screen, _BTN_BOT_HOV if b_hover else _BTN_BOT,
+                         btn_bot, border_radius=8)
+        bl = f_btn.render("Play vs Bot", True, _TXT_BTN)
+        screen.blit(bl, (btn_bot.centerx - bl.get_width() // 2,
+                         btn_bot.centery - bl.get_height() // 2))
+
+        # Descriptions
+        ld = f_small.render("Hotseat for two", True, _TXT_DIM)
+        screen.blit(ld, (btn_local.centerx - ld.get_width() // 2, row2_y + bh + 4))
+        bd = f_small.render("vs computer AI", True, _TXT_DIM)
+        screen.blit(bd, (btn_bot.centerx - bd.get_width() // 2, row2_y + bh + 4))
 
         # Footer
         ft = f_small.render("Esc to quit", True, (70, 68, 75))
@@ -226,6 +271,10 @@ def _run_main_menu(screen, fonts):
                 return "host"
             if j_hover:
                 return "join"
+            if l_hover:
+                return "local"
+            if b_hover:
+                return "bot"
 
         pygame.display.flip()
         clock.tick(60)
@@ -534,6 +583,219 @@ def _run_hosting_screen(screen, fonts):
         clock.tick(60)
 
 
+# ── Screen: Local Game Selection ─────────────────────────────────────────
+
+
+def _run_local_setup(screen, fonts):
+    """Game selection for local hotseat play.  Returns game_name or None."""
+    from games import list_games
+
+    clock = pygame.time.Clock()
+    f_title, f_sub, f_btn, f_small = fonts
+    games = list_games()
+    selected_game = None
+
+    _ITEM_BG  = (52, 48, 58)
+    _ITEM_HOV = (62, 58, 68)
+    _ITEM_SEL = (45, 100, 180)
+
+    while True:
+        mx, my = pygame.mouse.get_pos()
+        clicked = False
+
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                return None
+            if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                return None
+            if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                clicked = True
+
+        screen.fill(_BG)
+
+        t = f_title.render("Play Locally", True, _TXT)
+        screen.blit(t, (WIN_W // 2 - t.get_width() // 2, 20))
+
+        sub = f_small.render("Two players, same computer", True, _TXT_DIM)
+        screen.blit(sub, (WIN_W // 2 - sub.get_width() // 2, 54))
+
+        # Game list — centred
+        lx = WIN_W // 2 - 130
+        ly = 85
+        h = f_sub.render("Select a Game", True, _TXT_DIM)
+        screen.blit(h, (WIN_W // 2 - h.get_width() // 2, ly))
+        ly += 28
+
+        for gname in games:
+            r = pygame.Rect(lx, ly, 260, 30)
+            hov = r.collidepoint(mx, my)
+            if gname == selected_game:
+                pygame.draw.rect(screen, _ITEM_SEL, r, border_radius=4)
+            elif hov:
+                pygame.draw.rect(screen, _ITEM_HOV, r, border_radius=4)
+            else:
+                pygame.draw.rect(screen, _ITEM_BG, r, border_radius=4)
+            screen.blit(f_small.render(gname, True, _TXT), (lx + 10, ly + 7))
+            if hov and clicked:
+                selected_game = gname
+            ly += 34
+
+        # Start button
+        btn_start = pygame.Rect(WIN_W // 2 - 80, ly + 10, 160, 44)
+        can_start = selected_game is not None
+        start_hover = btn_start.collidepoint(mx, my) and can_start
+        sbg = (_BTN_LOCAL_HOV if start_hover
+               else (_BTN_LOCAL if can_start else _BTN_DIS))
+        pygame.draw.rect(screen, sbg, btn_start, border_radius=8)
+        sl = f_btn.render("Start Game", True,
+                          _TXT_BTN if can_start else _TXT_DIM)
+        screen.blit(sl, (btn_start.centerx - sl.get_width() // 2,
+                         btn_start.centery - sl.get_height() // 2))
+        if clicked and start_hover:
+            return selected_game
+
+        bk = f_small.render("Esc to go back", True, (70, 68, 75))
+        screen.blit(bk, (WIN_W // 2 - bk.get_width() // 2, WIN_H - 28))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
+def _launch_local_game(game_name):
+    """Launch a game in standalone hotseat mode.
+
+    Calls the display module's main() function.  When it exits
+    (via pygame.quit + sys.exit), we catch SystemExit and
+    reinitialise Pygame so the main menu can resume.
+    """
+    mod_name = game_name.lower() + "_display"
+    mod = __import__(f"games.{mod_name}", fromlist=["main"])
+    try:
+        mod.main()
+    except SystemExit:
+        pass
+    # Reinitialise Pygame for the menu
+    if not pygame.get_init():
+        pygame.init()
+
+
+# ── Screen: Bot Setup (game + difficulty selection) ──────────────────────
+
+
+def _run_bot_setup(screen, fonts):
+    """Game and difficulty selection for single-player vs bot.
+
+    Returns (game_name, difficulty) or None on back/quit.
+    """
+    from games import list_games
+
+    clock = pygame.time.Clock()
+    f_title, f_sub, f_btn, f_small = fonts
+
+    games = list_games()
+    selected_game = None
+    selected_diff = "medium"
+    diffs = ["easy", "medium", "hard"]
+    diff_labels = {"easy": "Easy", "medium": "Medium", "hard": "Hard"}
+    diff_colors = {
+        "easy":   (90, 180, 90),
+        "medium": (200, 170, 50),
+        "hard":   (200, 70, 70),
+    }
+
+    _ITEM_BG  = (52, 48, 58)
+    _ITEM_HOV = (62, 58, 68)
+    _ITEM_SEL = (45, 100, 180)
+
+    while True:
+        mx, my = pygame.mouse.get_pos()
+        clicked = False
+
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                return None
+            if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                return None
+            if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                clicked = True
+
+        screen.fill(_BG)
+
+        # Title
+        t = f_title.render("Play vs Bot", True, _TXT)
+        screen.blit(t, (WIN_W // 2 - t.get_width() // 2, 16))
+
+        # ── Left column: game list ────────────────────────────────────
+        lx, ly = 24, 55
+        h = f_sub.render("Select a Game", True, _TXT_DIM)
+        screen.blit(h, (lx, ly))
+        ly += 28
+
+        for gname in games:
+            r = pygame.Rect(lx, ly, 250, 30)
+            hov = r.collidepoint(mx, my)
+            if gname == selected_game:
+                pygame.draw.rect(screen, _ITEM_SEL, r, border_radius=4)
+            elif hov:
+                pygame.draw.rect(screen, _ITEM_HOV, r, border_radius=4)
+            else:
+                pygame.draw.rect(screen, _ITEM_BG, r, border_radius=4)
+            screen.blit(f_small.render(gname, True, _TXT), (lx + 10, ly + 7))
+            if hov and clicked:
+                selected_game = gname
+            ly += 34
+
+        # ── Right column: difficulty ──────────────────────────────────
+        rx, ry = 310, 55
+        screen.blit(f_sub.render("Difficulty", True, _TXT_DIM), (rx, ry))
+        ry += 28
+
+        for d in diffs:
+            r = pygame.Rect(rx, ry, 240, 36)
+            hov = r.collidepoint(mx, my)
+            if d == selected_diff:
+                pygame.draw.rect(screen, _ITEM_SEL, r, border_radius=4)
+            elif hov:
+                pygame.draw.rect(screen, _ITEM_HOV, r, border_radius=4)
+            else:
+                pygame.draw.rect(screen, _ITEM_BG, r, border_radius=4)
+            lbl = f_btn.render(diff_labels[d], True, diff_colors[d])
+            screen.blit(lbl, (rx + 14, ry + 8))
+            if hov and clicked:
+                selected_diff = d
+            ry += 42
+
+        # Difficulty description
+        ry += 6
+        desc = {
+            "easy": "Fast, makes mistakes",
+            "medium": "Moderate thinking time",
+            "hard": "Thinks several seconds",
+        }
+        dt = f_small.render(desc[selected_diff], True, _TXT_DIM)
+        screen.blit(dt, (rx, ry))
+
+        # ── Start button ──────────────────────────────────────────────
+        btn_start = pygame.Rect(rx, ry + 40, 240, 44)
+        can_start = selected_game is not None
+        start_hover = btn_start.collidepoint(mx, my) and can_start
+        sbg = _BTN_HOST_HOV if start_hover else (_BTN_HOST if can_start else _BTN_DIS)
+        pygame.draw.rect(screen, sbg, btn_start, border_radius=8)
+        sl = f_btn.render("Start Game", True,
+                          _TXT_BTN if can_start else _TXT_DIM)
+        screen.blit(sl, (btn_start.centerx - sl.get_width() // 2,
+                         btn_start.centery - sl.get_height() // 2))
+        if clicked and start_hover:
+            return (selected_game, selected_diff)
+
+        # Back hint
+        bk = f_small.render("Esc to go back", True, (70, 68, 75))
+        screen.blit(bk, (WIN_W // 2 - bk.get_width() // 2, WIN_H - 28))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+
 # ── Screen: Join (URL input) ─────────────────────────────────────────────
 
 
@@ -716,6 +978,26 @@ def main():
                 local_url, public_url = result
                 server_url = local_url
                 is_host = True
+
+            elif choice == "local":
+                game_name = _run_local_setup(screen, fonts)
+                if game_name is None:
+                    continue  # back to menu
+                _launch_local_game(game_name)
+                screen = pygame.display.set_mode((WIN_W, WIN_H))
+                pygame.display.set_caption("Board Games Online")
+                continue
+
+            elif choice == "bot":
+                result = _run_bot_setup(screen, fonts)
+                if result is None:
+                    continue  # back to menu
+                game_name, difficulty = result
+                from client.bot_game import run_vs_bot
+                run_vs_bot(screen, game_name, difficulty)
+                screen = pygame.display.set_mode((WIN_W, WIN_H))
+                pygame.display.set_caption("Board Games Online")
+                continue
 
             elif choice == "join":
                 result = _run_join_screen(screen, fonts)

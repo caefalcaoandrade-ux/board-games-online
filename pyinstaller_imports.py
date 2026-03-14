@@ -45,6 +45,8 @@ import client.lobby                   # noqa: F401
 import client.main                    # noqa: F401
 import client.shared                  # noqa: F401
 import client.host                    # noqa: F401
+import client.bot                     # noqa: F401
+import client.bot_game                # noqa: F401
 
 # ── Server (embedded for self-hosting) ───────────────────────────────────
 import server.main                    # noqa: F401

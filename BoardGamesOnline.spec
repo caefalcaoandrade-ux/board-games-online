@@ -72,6 +72,8 @@ a = Analysis(
         'client.network',
         'client.shared',
         'client.host',
+        'client.bot',
+        'client.bot_game',
 
         # Server (embedded for self-hosting)
         'server',
