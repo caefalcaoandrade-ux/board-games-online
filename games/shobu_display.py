@@ -47,12 +47,12 @@ except ImportError:
 
 CELL      = 90
 BOARD_PX  = CELL * 4
-GAP_X     = 80
-GAP_Y     = 120
+GAP_X     = 100
+GAP_Y     = 150
 PAD_L     = 74
 PAD_R     = 42
-PAD_TOP   = 130
-PAD_BOT   = 52
+PAD_TOP   = 140
+PAD_BOT   = 64
 
 WIN_W = PAD_L + BOARD_PX * 2 + GAP_X + PAD_R
 WIN_H = PAD_TOP + BOARD_PX * 2 + GAP_Y + PAD_BOT
@@ -694,7 +694,7 @@ class Renderer:
         if not game.game_over and not game.is_my_turn:
             wait = self.f_sm.render(
                 "Opponent's turn \u2014 waiting\u2026", True, TXT_DIM)
-            self.screen.blit(wait, (12, PAD_TOP - 46))
+            self.screen.blit(wait, (12, PAD_TOP - 68))
 
         # Opponent disconnected banner
         if game.opponent_disconnected and not game.game_over:

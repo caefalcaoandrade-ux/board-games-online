@@ -27,11 +27,13 @@ except ImportError:
 
 CELL = 68
 MARGIN = 30
+TOP_M = 46
 BOARD_PX = BOARD_N * CELL
 STATUS_H = 56
 WIN_W = BOARD_PX + 2 * MARGIN
-WIN_H = BOARD_PX + 2 * MARGIN + STATUS_H
-BX, BY = MARGIN, MARGIN
+WIN_H = BOARD_PX + TOP_M + MARGIN + STATUS_H
+BX = MARGIN
+BY = TOP_M
 
 PH_SELECT, PH_MOVE, PH_ARROW = 0, 1, 2
 FILES = "abcdefghij"
@@ -446,7 +448,7 @@ class Renderer:
             f_idx = (BOARD_N - 1 - i) if self.flipped else i
             lbl = self.coord_font.render(FILES[f_idx], True, C_COORD)
             x = BX + i * CELL + CELL // 2 - lbl.get_width() // 2
-            scr.blit(lbl, (x, BY - MARGIN + 6))
+            scr.blit(lbl, (x, BY - 16))
             scr.blit(lbl, (x, BY + BOARD_PX + 6))
             # ranks
             rank_num = (i + 1) if self.flipped else (BOARD_N - i)
@@ -516,9 +518,10 @@ class Renderer:
         """Draw overlays specific to online multiplayer."""
         # "Waiting for opponent" when it's not your turn
         if not game.game_over and not game.is_my_turn:
+            sy = BY + BOARD_PX + MARGIN + 4
             wait = self.hint_font.render(
                 "Opponent's turn \u2014 waiting\u2026", True, C_COORD)
-            self.screen.blit(wait, (BX, BY - MARGIN + 6 - 14))
+            self.screen.blit(wait, (BX, sy + 26))
 
         # Opponent disconnected banner
         if game.opponent_disconnected and not game.game_over:

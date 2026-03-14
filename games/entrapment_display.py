@@ -870,11 +870,12 @@ class Renderer:
             scr.blit(self.font_sm.render(entry, True, C_TEXT_DIM), (x0 + 4, y))
             y += 16
 
-        # new game button
-        self.btn_new.draw(scr, self.font)
+        # new game button (local mode only)
+        if not game.online:
+            self.btn_new.draw(scr, self.font)
 
-        # esc hint
-        if game.selected or game.mode not in ("select", "choose_cap"):
+        # esc hint (local mode only — shared command panel handles online)
+        if not game.online and (game.selected or game.mode not in ("select", "choose_cap")):
             scr.blit(self.font_sm.render("Esc to cancel", True, C_TEXT_DIM),
                      (x0, WIN_H - 16))
 
@@ -883,7 +884,7 @@ class Renderer:
             role = PLAYER_NAMES.get(game.my_player, "Player {}".format(game.my_player))
             accent = PLAYER_COLS.get(game.my_player, C_TEXT)
             tag = self.font_sm.render("You: {}".format(role), True, accent)
-            scr.blit(tag, (x0, WIN_H - 16))
+            scr.blit(tag, (x0, WIN_H - 32))
 
         # game-over overlay
         if game.game_over:
@@ -950,7 +951,7 @@ class Renderer:
         if not game.game_over and not game.is_my_turn:
             wait = self.font_sm.render(
                 "Opponent's turn \u2014 waiting\u2026", True, C_TEXT_DIM)
-            scr.blit(wait, (BOARD_X, BOARD_Y - 20))
+            scr.blit(wait, (BOARD_X, 4))
 
         # Opponent disconnected banner
         if game.opponent_disconnected and not game.game_over:

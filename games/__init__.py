@@ -5,6 +5,7 @@ To register a new game, add one import and one entry to GAME_REGISTRY.
 
 from games.abalone_logic import AbaloneLogic
 from games.amazons_logic import AmazonsLogic
+from games.arimaa_logic import ArimaaLogic
 from games.bashni_logic import BashniLogic
 from games.entrapment_logic import EntrapmentLogic
 from games.havannah_logic import HavannahLogic
@@ -21,6 +22,7 @@ from games.yinsh_logic import YinshLogic
 GAME_REGISTRY: dict[str, type] = {
     "Abalone": AbaloneLogic,
     "Amazons": AmazonsLogic,
+    "Arimaa": ArimaaLogic,
     "Bashni": BashniLogic,
     "Entrapment": EntrapmentLogic,
     "Havannah": HavannahLogic,

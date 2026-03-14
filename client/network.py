@@ -190,6 +190,9 @@ class NetworkClient:
         except json.JSONDecodeError:
             return
 
+        if not isinstance(msg, dict):
+            return
+
         # Track room code and player ID locally
         msg_type = msg.get("type")
         if msg_type == "room_created":

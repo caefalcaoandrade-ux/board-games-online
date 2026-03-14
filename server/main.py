@@ -146,7 +146,22 @@ async def websocket_endpoint(ws: WebSocket):
 
     try:
         while True:
-            data = await ws.receive_json()
+            try:
+                data = await ws.receive_json()
+            except ValueError:
+                await send(ws, {
+                    "type": "error",
+                    "message": "Invalid JSON.",
+                })
+                continue
+
+            if not isinstance(data, dict):
+                await send(ws, {
+                    "type": "error",
+                    "message": "Message must be a JSON object.",
+                })
+                continue
+
             msg_type = data.get("type")
 
             # ── Create Room ────────────────────────────────────────────

@@ -32,7 +32,7 @@ N = BOARD_N
 CELL = 68
 BOARD_PX = N * CELL
 LABEL_M = 44
-TOP_M = 16
+TOP_M = 32
 RIGHT_M = 16
 PANEL_H = 64
 WIN_W = LABEL_M + BOARD_PX + RIGHT_M
@@ -431,7 +431,7 @@ class Renderer:
             role = "Attacker" if game.my_player == PLAYER_ATTACKER else "Defender"
             accent = C_ACCENT_ATK if game.my_player == PLAYER_ATTACKER else C_ACCENT_DEF
             tag = self.sfont.render(f"You: {role}", True, accent)
-            self.screen.blit(tag, (WIN_W - tag.get_width() - 12, py + 44))
+            self.screen.blit(tag, (280, py + 44))
         else:
             hint = self.sfont.render("R Restart   U Undo   F Flip   Q Quit",
                                      True, C_LABEL)
@@ -472,6 +472,13 @@ class Renderer:
 
     def _draw_online_status(self, game):
         """Draw overlays specific to online multiplayer."""
+        # "Waiting for opponent" when it's not your turn
+        if not game.game_over and not game.is_my_turn:
+            py = TOP_M + BOARD_PX + LABEL_M
+            wait = self.sfont.render(
+                "Opponent's turn \u2014 waiting\u2026", True, C_LABEL)
+            self.screen.blit(wait, (WIN_W - wait.get_width() - 12, py + 44))
+
         # Opponent disconnected banner
         if game.opponent_disconnected and not game.game_over:
             overlay = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)

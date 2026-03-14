@@ -11,49 +11,40 @@
 # console=True to console=False in the EXE section below.
 
 import os
+import sys
 import certifi
 
 # ── Analysis ──────────────────────────────────────────────────────────────
-# PyInstaller analyses build_exe.py to discover imports.  build_exe.py
-# imports pyinstaller_imports.py, which explicitly imports every game logic
-# and display module so nothing is missed.
-#
-# hiddenimports lists the same modules as a belt-and-suspenders backup in
-# case PyInstaller's import scanner misses anything despite the explicit
-# imports in pyinstaller_imports.py.
 
 a = Analysis(
-    # The build entry point script.
     ['build_exe.py'],
 
     pathex=['.'],
 
     binaries=[],
 
-    # Include the entire games/ folder as data so that any non-.py files
-    # (e.g. the original .py backups, _suppress.py, __init__.py) are
-    # bundled.  The tuple is (source_path, destination_in_bundle).
+    # Data files bundled into the executable.
     datas=[
         ('games', 'games'),
         ('client', 'client'),
+        ('server', 'server'),
         # Bundle certifi's CA certificate file so wss:// connections work
         # inside the PyInstaller .exe (the OS cert store is not available).
         (certifi.where(), 'certifi'),
+        # Note: pyngrok downloads the ngrok binary at runtime via its
+        # installer module.  No ngrok binary needs to be bundled here.
     ],
 
-    # Explicit hidden imports — every module that is loaded dynamically at
-    # runtime via the game registry or the lobby dispatch table.  These
-    # duplicate what pyinstaller_imports.py already covers, but listing
-    # them here guarantees PyInstaller includes them even if it fails to
-    # trace the explicit import file for any reason.
     hiddenimports=[
         # Game registry and base class
         'games',
         'games.base_game',
+        'games._suppress',
 
-        # Logic modules (loaded by games/__init__.py registry)
+        # Logic modules
         'games.abalone_logic',
         'games.amazons_logic',
+        'games.arimaa_logic',
         'games.bashni_logic',
         'games.entrapment_logic',
         'games.havannah_logic',
@@ -62,9 +53,10 @@ a = Analysis(
         'games.tumbleweed_logic',
         'games.yinsh_logic',
 
-        # Display modules (loaded lazily by client/lobby.py dispatch)
+        # Display modules
         'games.abalone_display',
         'games.amazons_display',
+        'games.arimaa_display',
         'games.bashni_display',
         'games.entrapment_display',
         'games.havannah_display',
@@ -79,13 +71,40 @@ a = Analysis(
         'client.lobby',
         'client.network',
         'client.shared',
+        'client.host',
 
-        # Third-party packages that PyInstaller sometimes misses
+        # Server (embedded for self-hosting)
+        'server',
+        'server.main',
+
+        # Third-party packages
         'websocket',
         'numpy',
         'pygame',
 
-        # SSL / certificate packages needed for wss:// connections
+        # uvicorn and sub-modules PyInstaller misses
+        'uvicorn',
+        'uvicorn.config',
+        'uvicorn.main',
+        'uvicorn.loops.auto',
+        'uvicorn.lifespan.on',
+        'uvicorn.protocols.websockets.auto',
+
+        # fastapi
+        'fastapi',
+
+        # pyngrok and sub-modules
+        'pyngrok',
+        'pyngrok.ngrok',
+        'pyngrok.conf',
+        'pyngrok.installer',
+        'pyngrok.process',
+        'pyngrok.exception',
+
+        # Clipboard
+        'pyperclip',
+
+        # SSL / certificates
         'certifi',
         'ssl',
         '_ssl',
@@ -94,27 +113,15 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-
-    # Do not exclude anything — we want a complete bundle.
     excludes=[],
-
     noarchive=False,
 )
 
 # ── PYZ ───────────────────────────────────────────────────────────────────
-# Compressed archive of all pure-Python modules.  This is unpacked into
-# memory at runtime by the bootloader.
 
 pyz = PYZ(a.pure)
 
 # ── EXE ───────────────────────────────────────────────────────────────────
-# The final executable.  Key settings:
-#
-#   name          — output filename (BoardGamesOnline.exe on Windows)
-#   onefile       — True bundles everything into a single .exe
-#   console       — True keeps the terminal visible for error messages;
-#                   set to False for a clean windowed release
-#   icon          — set to an .ico path if you have one (e.g. 'icon.ico')
 
 exe = EXE(
     pyz,
@@ -144,3 +151,18 @@ exe = EXE(
     # Uncomment and set this to an .ico file path to give the .exe an icon:
     # icon='icon.ico',
 )
+
+# ── macOS .app bundle ────────────────────────────────────────────────────
+# On macOS, wrap the executable in a .app bundle so users can double-click it.
+# BUNDLE is only defined in the PyInstaller spec namespace on macOS.
+
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='BoardGamesOnline.app',
+        bundle_identifier='com.boardgamesonline.app',
+        info_plist={
+            'CFBundleShortVersionString': '1.0.0',
+            'NSHighResolutionCapable': True,
+        },
+    )

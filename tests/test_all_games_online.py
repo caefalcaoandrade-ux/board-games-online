@@ -38,6 +38,7 @@ ALL_GAMES = list(GAME_REGISTRY.keys())
 DISPLAY_MODULES = {
     "Abalone": "abalone_display",
     "Amazons": "amazons_display",
+    "Arimaa": "arimaa_display",
     "Bashni": "bashni_display",
     "Entrapment": "entrapment_display",
     "Havannah": "havannah_display",

@@ -32,8 +32,8 @@ except ImportError:
 # ── Display Constants ────────────────────────────────────────────────────────
 
 HEX_R = 27          # hex circumradius in pixels
-WIN_W, WIN_H = 1340, 880
-BOARD_CX = 420      # board centre x
+WIN_W, WIN_H = 1340, 930
+BOARD_CX = 395      # board centre x (centred in non-panel area)
 BOARD_CY = 440      # board centre y
 PANEL_LEFT = 790    # info-panel left edge
 FPS = 60
@@ -613,7 +613,7 @@ class Renderer:
             role = COLOUR_NAME.get(game.my_player, "?")
             accent = RED_C if game.my_player == RED else WHT_C
             tag = self.fn_tiny.render(f"You: {role}", True, accent)
-            screen.blit(tag, (WIN_W - tag.get_width() - 18, WIN_H - 26))
+            screen.blit(tag, (WIN_W - tag.get_width() - 52, WIN_H - 26))
         else:
             t = self.fn_tiny.render("N = New game    P = Pass    Q = Quit", True, TXT_DIM)
             screen.blit(t, (WIN_W - t.get_width() - 18, WIN_H - 26))
@@ -661,7 +661,7 @@ class Renderer:
         if not game.game_over and not game.is_my_turn:
             wait = self.fn_small.render(
                 "Opponent's turn \u2014 waiting\u2026", True, TXT_DIM)
-            screen.blit(wait, (12, 8))
+            screen.blit(wait, (12, 32))
 
         # Opponent disconnected banner
         if game.opponent_disconnected and not game.game_over:

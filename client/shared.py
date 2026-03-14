@@ -104,6 +104,8 @@ class Orientation:
 # ── Command Panel Renderer ───────────────────────────────────────────────────
 
 _font_cache: pygame.font.Font | None = None
+_ICON_SIZE = 22
+_ICON_MARGIN = 10
 
 
 def _get_font() -> pygame.font.Font:
@@ -115,8 +117,22 @@ def _get_font() -> pygame.font.Font:
 
 def draw_command_panel(surface: pygame.Surface, hist: History,
                        is_my_turn: bool = True):
-    """Draw a small semi-transparent command reference in the bottom-right."""
+    """Draw a hover-reveal command panel in the bottom-right corner.
+
+    A small "?" icon is always visible.  Hovering it reveals the full
+    keyboard-shortcut reference.  History position is shown as a small
+    label next to the icon when browsing past states.
+    """
     font = _get_font()
+    win_w, win_h = surface.get_size()
+    mx, my = pygame.mouse.get_pos()
+
+    # ── Icon position ────────────────────────────────────────────────
+    ix = win_w - _ICON_SIZE - _ICON_MARGIN
+    iy = win_h - _ICON_SIZE - _ICON_MARGIN
+    icon_rect = pygame.Rect(ix, iy, _ICON_SIZE, _ICON_SIZE)
+
+    # ── Build panel content ──────────────────────────────────────────
     pad_x, pad_y = 10, 6
     line_h = 17
     fg = (180, 180, 180)
@@ -129,26 +145,51 @@ def draw_command_panel(surface: pygame.Surface, hist: History,
     if not is_my_turn and hist.is_live:
         lines.append(("Waiting for opponent", fg_dim))
 
-    # Measure
-    max_w = 0
     rendered = []
+    max_w = 0
     for text, color in lines:
-        surf = font.render(text, True, color)
-        rendered.append(surf)
-        max_w = max(max_w, surf.get_width())
+        s = font.render(text, True, color)
+        rendered.append(s)
+        max_w = max(max_w, s.get_width())
 
     panel_w = max_w + pad_x * 2
     panel_h = len(rendered) * line_h + pad_y * 2
-    win_w, win_h = surface.get_size()
-    px = win_w - panel_w - 8
-    py = win_h - panel_h - 8
 
-    bg = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
-    bg.fill((0, 0, 0, 100))
-    surface.blit(bg, (px, py))
+    # Panel sits above the icon, right-aligned
+    px = win_w - panel_w - _ICON_MARGIN
+    py = iy - panel_h - 4
+    panel_rect = pygame.Rect(px, py, panel_w, panel_h)
 
-    for i, surf in enumerate(rendered):
-        surface.blit(surf, (px + pad_x, py + pad_y + i * line_h))
+    # ── Show full panel on hover (icon or panel area) ────────────────
+    show_panel = icon_rect.collidepoint(mx, my) or panel_rect.collidepoint(mx, my)
+
+    if show_panel:
+        bg = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 160))
+        surface.blit(bg, (px, py))
+        for i, s in enumerate(rendered):
+            surface.blit(s, (px + pad_x, py + pad_y + i * line_h))
+
+    # ── Icon (always visible) ────────────────────────────────────────
+    icon_bg = pygame.Surface((_ICON_SIZE, _ICON_SIZE), pygame.SRCALPHA)
+    icon_bg.fill((0, 0, 0, 140))
+    surface.blit(icon_bg, (ix, iy))
+    pygame.draw.rect(surface, (110, 110, 110), icon_rect, 1, border_radius=4)
+    q = font.render("?", True, (190, 190, 190))
+    surface.blit(q, (ix + _ICON_SIZE // 2 - q.get_width() // 2,
+                     iy + _ICON_SIZE // 2 - q.get_height() // 2))
+
+    # ── History position (always visible when browsing) ──────────────
+    if not hist.is_live and not show_panel:
+        pos = font.render(hist.position_str, True, fg)
+        pw = pos.get_width() + 8
+        ph = pos.get_height() + 4
+        lx = ix - pw - 6
+        ly = iy + (_ICON_SIZE - ph) // 2
+        pbg = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        pbg.fill((0, 0, 0, 120))
+        surface.blit(pbg, (lx, ly))
+        surface.blit(pos, (lx + 4, ly + 2))
 
 
 # ── Shared Input Handler ────────────────────────────────────────────────────

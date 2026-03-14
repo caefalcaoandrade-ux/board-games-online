@@ -86,13 +86,13 @@ def run_lobby(server_url: str = "ws://localhost:8000/ws"):
     clock = pygame.time.Clock()
 
     # Fonts
-    f_title   = pygame.font.SysFont("arial", 26, bold=True)
+    f_title   = pygame.font.SysFont("arial", 24, bold=True)
     f_head    = pygame.font.SysFont("arial", 18, bold=True)
     f_item    = pygame.font.SysFont("arial", 17)
     f_btn     = pygame.font.SysFont("arial", 17, bold=True)
     f_small   = pygame.font.SysFont("arial", 14)
     f_code    = pygame.font.SysFont("courier", 38, bold=True)
-    f_input   = pygame.font.SysFont("courier", 22)
+    f_input   = pygame.font.SysFont("courier", 20)
     f_status  = pygame.font.SysFont("arial", 20)
 
     # State
@@ -152,6 +152,28 @@ def run_lobby(server_url: str = "ws://localhost:8000/ws"):
                         input_active = False
                     elif ev.key == pygame.K_RETURN and code_input.strip():
                         begin_action("join", code_input.strip())
+                    elif (ev.key == pygame.K_v
+                          and (ev.mod & (pygame.KMOD_CTRL | pygame.KMOD_META))):
+                        # Ctrl+V / Cmd+V paste
+                        pasted = ""
+                        try:
+                            import pyperclip
+                            pasted = pyperclip.paste()
+                        except Exception:
+                            try:
+                                import tkinter as tk
+                                root = tk.Tk()
+                                root.withdraw()
+                                pasted = root.clipboard_get()
+                                root.destroy()
+                            except Exception:
+                                pass
+                        # Filter to alnum and respect 6-char limit
+                        for ch in pasted:
+                            if len(code_input) >= 6:
+                                break
+                            if ch.isalnum():
+                                code_input += ch.upper()
                     elif len(code_input) < 6 and ev.unicode.isalnum():
                         code_input += ev.unicode.upper()
 
@@ -330,6 +352,7 @@ def _load_dispatch():
         return
     from games.abalone_display import run_online as abalone_online
     from games.amazons_display import run_online as amazons_online
+    from games.arimaa_display import run_online as arimaa_online
     from games.bashni_display import run_online as bashni_online
     from games.entrapment_display import run_online as entrapment_online
     from games.havannah_display import run_online as havannah_online
@@ -339,6 +362,7 @@ def _load_dispatch():
     from games.yinsh_display import run_online as yinsh_online
     _ONLINE_DISPATCH["Abalone"] = abalone_online
     _ONLINE_DISPATCH["Amazons"] = amazons_online
+    _ONLINE_DISPATCH["Arimaa"] = arimaa_online
     _ONLINE_DISPATCH["Bashni"] = bashni_online
     _ONLINE_DISPATCH["Entrapment"] = entrapment_online
     _ONLINE_DISPATCH["Havannah"] = havannah_online

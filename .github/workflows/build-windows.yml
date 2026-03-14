@@ -1,55 +1,107 @@
-# Build a standalone Windows .exe of the Board Games Online client.
+# Build standalone executables for Board Games Online.
 #
-# This workflow runs only when triggered manually from the GitHub Actions tab
-# (Actions → Build Windows .exe → Run workflow).  It does NOT run on push or PR.
-#
-# The resulting BoardGamesOnline.exe is uploaded as a downloadable artifact
-# that you can grab from the workflow run's summary page.
+# Builds Windows .exe, Linux binary, and macOS .app in parallel.
+# Triggered manually from the GitHub Actions tab
+# (Actions → Build Executables → Run workflow).
 
-name: Build Windows .exe
+name: Build Executables
 
 on:
-  # Manual trigger only — click "Run workflow" in the Actions tab.
   workflow_dispatch:
 
 jobs:
-  build:
+  # ── Windows Build ────────────────────────────────────────────────────────
+  build-windows:
     runs-on: windows-latest
 
     steps:
-      # ── 1. Check out the repository ─────────────────────────────────
       - name: Check out code
         uses: actions/checkout@v4
 
-      # ── 2. Set up Python 3.11 (matches the dev environment) ─────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # ── 3. Install runtime dependencies from requirements.txt ───────
-      # This installs pygame, numpy, and websocket-client — everything
-      # the client needs at runtime.
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ── 4. Install PyInstaller ──────────────────────────────────────
       - name: Install PyInstaller
         run: pip install pyinstaller
 
-      # ── 5. Build the .exe using the spec file ──────────────────────
-      # BoardGamesOnline.spec is at the repository root.  It references
-      # build_exe.py (the entry point) and pyinstaller_imports.py (the
-      # hidden imports file), both also at the root.  The spec bundles
-      # everything into a single .exe in the dist/ folder.
       - name: Build .exe with PyInstaller
         run: pyinstaller BoardGamesOnline.spec
 
-      # ── 6. Upload the .exe as a downloadable artifact ───────────────
-      # After the workflow completes, go to the run's summary page and
-      # download "BoardGamesOnline" from the Artifacts section.
-      - name: Upload artifact
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BoardGamesOnline
+          name: BoardGamesOnline-Windows
           path: dist/BoardGamesOnline.exe
+
+  # ── Linux Build ──────────────────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Pygame on Linux needs SDL2 development libraries
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build Linux binary with PyInstaller
+        run: pyinstaller BoardGamesOnline.spec
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoardGamesOnline-Linux
+          path: dist/BoardGamesOnline
+
+  # ── macOS Build ─────────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build macOS .app with PyInstaller
+        run: pyinstaller BoardGamesOnline.spec
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p artifact
+          cp -R dist/BoardGamesOnline.app artifact/
+          cp MAC_INSTRUCTIONS.txt artifact/
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoardGamesOnline-macOS
+          path: artifact/

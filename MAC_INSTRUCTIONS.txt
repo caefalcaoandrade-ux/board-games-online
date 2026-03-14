@@ -1,0 +1,1 @@
+If macOS blocks the app, right-click it, click Open, then click Open again in the dialog.

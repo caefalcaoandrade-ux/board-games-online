@@ -828,7 +828,7 @@ def _draw_online_status(surf, game, fonts):
     if not game.game_over and not game.is_my_turn:
         wait = fonts["hint"].render(
             "Opponent's turn \u2014 waiting\u2026", True, C_TEXT_DIM)
-        surf.blit(wait, (12, MARGIN - 14))
+        surf.blit(wait, (12, 4))
 
     # Opponent disconnected banner
     if game.opponent_disconnected and not game.game_over:
