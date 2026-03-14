@@ -37,6 +37,8 @@ def test_logic_no_pygame_import(game_name):
     # YINSH has uppercase name in registry but lowercase module
     if game_name == "YINSH":
         mod_name = "games.yinsh_logic"
+    elif game_name == "BaghChal":
+        mod_name = "games.bagh_chal_logic"
     mod = importlib.import_module(mod_name)
     # Check that pygame is not in the module's globals
     assert "pygame" not in dir(mod), f"{mod_name} imports pygame"

@@ -9,8 +9,9 @@ import sys
 import os
 import json
 
-# Block pygame so we prove no logic module depends on it
-sys.modules["pygame"] = None
+# Note: pygame independence is verified by the multiplayer readiness tests
+# (test_logic_no_pygame_import).  We do NOT block pygame at module level
+# here because that poisons sys.modules for the entire pytest session.
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

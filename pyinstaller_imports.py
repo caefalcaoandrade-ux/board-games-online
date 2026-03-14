@@ -16,6 +16,8 @@ import games._suppress                # noqa: F401
 import games.abalone_logic            # noqa: F401
 import games.amazons_logic            # noqa: F401
 import games.arimaa_logic             # noqa: F401
+import games.bagh_chal_logic          # noqa: F401
+import games.bao_logic                # noqa: F401
 import games.bashni_logic             # noqa: F401
 import games.entrapment_logic         # noqa: F401
 import games.havannah_logic           # noqa: F401
@@ -28,6 +30,8 @@ import games.yinsh_logic              # noqa: F401
 import games.abalone_display          # noqa: F401
 import games.amazons_display          # noqa: F401
 import games.arimaa_display           # noqa: F401
+import games.bagh_chal_display        # noqa: F401
+import games.bao_display              # noqa: F401
 import games.bashni_display           # noqa: F401
 import games.entrapment_display       # noqa: F401
 import games.havannah_display         # noqa: F401

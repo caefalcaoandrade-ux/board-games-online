@@ -7,14 +7,9 @@ import json
 # Ensure project root is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Block pygame from being imported to prove pure independence
-import builtins
-_real_import = builtins.__import__
-def _block_pygame(name, *args, **kwargs):
-    if name == "pygame" or name.startswith("pygame."):
-        raise ImportError(f"BLOCKED: {name} — this test must not touch Pygame")
-    return _real_import(name, *args, **kwargs)
-builtins.__import__ = _block_pygame
+# Verify that the logic module itself does not import pygame
+# (checked at the end of main() rather than via import hook,
+# which would interfere with other test modules in the suite).
 
 from games.amazons_logic import AmazonsLogic, WHITE, BLACK, BOARD_N
 

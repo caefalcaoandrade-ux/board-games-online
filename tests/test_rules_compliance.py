@@ -1315,6 +1315,323 @@ def test_tumbleweed_scoring():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# ARIMAA
+# ═══════════════════════════════════════════════════════════════════════════
+
+from games.arimaa_logic import ArimaaLogic
+
+
+def test_arimaa_board_8x8():
+    """Board is 8x8."""
+    logic = ArimaaLogic()
+    state = logic.create_initial_state()
+    assert len(state["board"]) == 8
+    for row in state["board"]:
+        assert len(row) == 8
+
+
+def test_arimaa_initial_setup_phase():
+    """Game begins in setup_gold phase, player 1 first."""
+    logic = ArimaaLogic()
+    state = logic.create_initial_state()
+    assert state["phase"] == "setup_gold"
+    assert state["current_player"] == 1
+
+
+def test_arimaa_piece_counts():
+    """Each player has 16 pieces: 8R, 2C, 2D, 2H, 1M, 1E."""
+    gold = ArimaaLogic.GOLD_PIECES
+    silver = ArimaaLogic.SILVER_PIECES
+    assert len(gold) == 16
+    assert len(silver) == 16
+    assert gold.count("R") == 8
+    assert gold.count("C") == 2
+    assert gold.count("D") == 2
+    assert gold.count("H") == 2
+    assert gold.count("M") == 1
+    assert gold.count("E") == 1
+
+
+def test_arimaa_trap_squares():
+    """Four trap squares at (2,2), (2,5), (5,2), (5,5)."""
+    assert ArimaaLogic.TRAPS == [[2, 2], [2, 5], [5, 2], [5, 5]]
+
+
+def test_arimaa_strength_ordering():
+    """E>M>H>D>C>R, uppercase and lowercase equal."""
+    s = ArimaaLogic.STRENGTH
+    assert s["E"] > s["M"] > s["H"] > s["D"] > s["C"] > s["R"]
+    for p in "EMHDCR":
+        assert s[p] == s[p.lower()]
+
+
+def test_arimaa_setup_gold_places_on_rows_0_1():
+    """Gold pieces placed during setup must go on rows 0–1."""
+    logic = ArimaaLogic()
+    state = logic.create_initial_state()
+    moves = logic.get_legal_moves(state, 1)
+    assert len(moves) > 0
+    for m in moves:
+        assert m[0] == "place"
+        assert m[2] in (0, 1), f"Gold setup move on row {m[2]}, expected 0 or 1"
+
+
+def test_arimaa_setup_silver_places_on_rows_6_7():
+    """Silver pieces placed during setup must go on rows 6–7."""
+    logic = ArimaaLogic()
+    state = logic.create_initial_state()
+    # Play through gold setup
+    for _ in range(16):
+        moves = logic.get_legal_moves(state, 1)
+        state = logic.apply_move(state, 1, moves[0])
+    assert state["phase"] == "setup_silver"
+    moves = logic.get_legal_moves(state, 2)
+    assert len(moves) > 0
+    for m in moves:
+        assert m[0] == "place"
+        assert m[2] in (6, 7), f"Silver setup move on row {m[2]}, expected 6 or 7"
+
+
+def test_arimaa_four_directions():
+    """Four cardinal directions only (no diagonals)."""
+    assert len(ArimaaLogic.DIRS) == 4
+    for d in ArimaaLogic.DIRS:
+        assert abs(d[0]) + abs(d[1]) == 1
+
+
+def test_arimaa_empty_board_initially():
+    """Board starts completely empty."""
+    logic = ArimaaLogic()
+    state = logic.create_initial_state()
+    for row in state["board"]:
+        for cell in row:
+            assert cell is None
+
+
+def test_arimaa_game_not_over_during_setup():
+    """Game should not be over during setup phase."""
+    logic = ArimaaLogic()
+    state = logic.create_initial_state()
+    status = logic.get_game_status(state)
+    assert status["is_over"] is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BAGH CHAL
+# ═══════════════════════════════════════════════════════════════════════════
+
+from games.bagh_chal_logic import (
+    BaghChalLogic, TIGER, GOAT, EMPTY,
+    PLAYER_GOAT, PLAYER_TIGER, ADJACENCY,
+)
+
+
+def test_bagh_chal_board_25_positions():
+    """Board has 25 positions (5×5)."""
+    logic = BaghChalLogic()
+    state = logic.create_initial_state()
+    assert len(state["board"]) == 25
+
+
+def test_bagh_chal_four_tigers_at_corners():
+    """Four tigers at corners: positions 0, 4, 20, 24."""
+    logic = BaghChalLogic()
+    state = logic.create_initial_state()
+    for pos in [0, 4, 20, 24]:
+        assert state["board"][pos] == TIGER
+    tiger_count = state["board"].count(TIGER)
+    assert tiger_count == 4
+
+
+def test_bagh_chal_20_goats_in_reserve():
+    """20 goats start in reserve."""
+    logic = BaghChalLogic()
+    state = logic.create_initial_state()
+    assert state["goats_in_reserve"] == 20
+    assert state["goats_captured"] == 0
+
+
+def test_bagh_chal_goats_move_first():
+    """Player 1 (Goats) moves first."""
+    logic = BaghChalLogic()
+    state = logic.create_initial_state()
+    assert logic.get_current_player(state) == PLAYER_GOAT
+
+
+def test_bagh_chal_adjacency_25_nodes():
+    """Adjacency list has exactly 25 entries."""
+    assert len(ADJACENCY) == 25
+
+
+def test_bagh_chal_placement_phase():
+    """In phase 1 (reserve > 0), goats can only place — not move."""
+    logic = BaghChalLogic()
+    state = logic.create_initial_state()
+    moves = logic.get_legal_moves(state, PLAYER_GOAT)
+    assert all(m["type"] == "place" for m in moves)
+    # 25 - 4 tigers = 21 empty spots
+    assert len(moves) == 21
+
+
+def test_bagh_chal_tiger_win_at_5_captures():
+    """Tigers win when 5 goats are captured."""
+    logic = BaghChalLogic()
+    state = logic.create_initial_state()
+    state["goats_captured"] = 5
+    status = logic.get_game_status(state)
+    assert status["is_over"] is True
+    assert status["winner"] == PLAYER_TIGER
+
+
+def test_bagh_chal_tiger_captures_are_jumps():
+    """Tiger captures require jumping over adjacent goat to empty landing."""
+    logic = BaghChalLogic()
+    state = logic.create_initial_state()
+    # Place a goat adjacent to a tiger to create a capture scenario
+    state["board"][1] = GOAT  # position 1 is adjacent to tiger at 0
+    state["goats_in_reserve"] -= 1
+    # Switch to tiger's turn
+    state["turn"] = PLAYER_TIGER
+    moves = logic.get_legal_moves(state, PLAYER_TIGER)
+    captures = [m for m in moves if m["type"] == "capture"]
+    for cap in captures:
+        # Landing spot must be adjacent to the jumped-over piece
+        assert cap["over"] in ADJACENCY[cap["from"]]
+        assert cap["to"] in ADJACENCY[cap["over"]]
+
+
+def test_bagh_chal_threefold_draw():
+    """Threefold repetition triggers a draw."""
+    logic = BaghChalLogic()
+    state = logic.create_initial_state()
+    key = state["board"].copy()
+    # Artificially add history entries to trigger threefold
+    from games.bagh_chal_logic import _state_key
+    sk = _state_key(state["board"], state["turn"])
+    state["history"] = [sk, sk, sk]
+    status = logic.get_game_status(state)
+    assert status["is_over"] is True
+    assert status["is_draw"] is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BAO
+# ═══════════════════════════════════════════════════════════════════════════
+
+from games.bao_logic import (
+    BaoGame, PLAYER_SOUTH, PLAYER_NORTH,
+    NYUMBA_IDX, CW_TRACK, CCW_TRACK, _pk, _opp,
+)
+
+
+def test_bao_board_32_pits():
+    """Each player has 16 pits (8 front + 8 back) = 32 total."""
+    game = BaoGame()
+    state = game.create_initial_state()
+    for p in [PLAYER_SOUTH, PLAYER_NORTH]:
+        pk = _pk(p)
+        assert len(state[pk]["front"]) == 8
+        assert len(state[pk]["back"]) == 8
+
+
+def test_bao_initial_seeds_per_player():
+    """Each player: F5=6, F6=2, F7=2, store=22, all other=0."""
+    game = BaoGame()
+    state = game.create_initial_state()
+    for p in [PLAYER_SOUTH, PLAYER_NORTH]:
+        pk = _pk(p)
+        assert state[pk]["front"][4] == 6, "F5 (nyumba) should have 6"
+        assert state[pk]["front"][5] == 2, "F6 should have 2"
+        assert state[pk]["front"][6] == 2, "F7 should have 2"
+        assert state[pk]["store"] == 22
+        # All other front pits are 0
+        for i in [0, 1, 2, 3, 7]:
+            assert state[pk]["front"][i] == 0
+        # All back pits are 0
+        for i in range(8):
+            assert state[pk]["back"][i] == 0
+
+
+def test_bao_total_seeds_64():
+    """Total seeds in the game: 64 (32 per player)."""
+    game = BaoGame()
+    state = game.create_initial_state()
+    total = 0
+    for p in [PLAYER_SOUTH, PLAYER_NORTH]:
+        pk = _pk(p)
+        total += sum(state[pk]["front"])
+        total += sum(state[pk]["back"])
+        total += state[pk]["store"]
+    assert total == 64
+
+
+def test_bao_south_moves_first():
+    """South (Player 1) moves first."""
+    game = BaoGame()
+    state = game.create_initial_state()
+    assert game.get_current_player(state) == PLAYER_SOUTH
+
+
+def test_bao_nyumba_at_index_4():
+    """Nyumba is F5 = index 4 (0-indexed)."""
+    assert NYUMBA_IDX == 4
+
+
+def test_bao_nyumba_owned_initially():
+    """Both players' nyumba are owned at start."""
+    game = BaoGame()
+    state = game.create_initial_state()
+    for p in [PLAYER_SOUTH, PLAYER_NORTH]:
+        pk = _pk(p)
+        assert state[pk]["nyumba_owned"] is True
+
+
+def test_bao_clockwise_track_16_pits():
+    """Clockwise track visits all 16 pits per player."""
+    assert len(CW_TRACK) == 16
+    assert len(CCW_TRACK) == 16
+    # CW starts with front row left-to-right, then back row right-to-left
+    assert CW_TRACK[0] == ("front", 0)
+    assert CW_TRACK[7] == ("front", 7)
+    assert CW_TRACK[8] == ("back", 7)
+    assert CW_TRACK[15] == ("back", 0)
+
+
+def test_bao_opponent_function():
+    """_opp returns the opposite player."""
+    assert _opp(PLAYER_SOUTH) == PLAYER_NORTH
+    assert _opp(PLAYER_NORTH) == PLAYER_SOUTH
+
+
+def test_bao_kutakatia_none_initially():
+    """No kutakatia at game start."""
+    game = BaoGame()
+    state = game.create_initial_state()
+    assert state["kutakatia"] is None
+
+
+def test_bao_kunamua_phase_initially():
+    """Both players start in kunamua (store > 0)."""
+    game = BaoGame()
+    state = game.create_initial_state()
+    for p in [PLAYER_SOUTH, PLAYER_NORTH]:
+        pk = _pk(p)
+        assert state[pk]["store"] > 0
+
+
+def test_bao_front_row_empty_loses():
+    """If a player's front row is empty, they lose."""
+    game = BaoGame()
+    state = game.create_initial_state()
+    # Empty South's front row
+    pk = _pk(PLAYER_SOUTH)
+    state[pk]["front"] = [0] * 8
+    status = game.get_game_status(state)
+    assert status["is_over"] is True
+    assert status["winner"] == PLAYER_NORTH
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Runner
 # ═══════════════════════════════════════════════════════════════════════════
 

@@ -383,6 +383,8 @@ def _load_dispatch():
     from games.abalone_display import run_online as abalone_online
     from games.amazons_display import run_online as amazons_online
     from games.arimaa_display import run_online as arimaa_online
+    from games.bagh_chal_display import run_online as bagh_chal_online
+    from games.bao_display import run_online as bao_online
     from games.bashni_display import run_online as bashni_online
     from games.entrapment_display import run_online as entrapment_online
     from games.havannah_display import run_online as havannah_online
@@ -393,6 +395,8 @@ def _load_dispatch():
     _ONLINE_DISPATCH["Abalone"] = abalone_online
     _ONLINE_DISPATCH["Amazons"] = amazons_online
     _ONLINE_DISPATCH["Arimaa"] = arimaa_online
+    _ONLINE_DISPATCH["BaghChal"] = bagh_chal_online
+    _ONLINE_DISPATCH["Bao"] = bao_online
     _ONLINE_DISPATCH["Bashni"] = bashni_online
     _ONLINE_DISPATCH["Entrapment"] = entrapment_online
     _ONLINE_DISPATCH["Havannah"] = havannah_online

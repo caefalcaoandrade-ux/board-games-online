@@ -39,6 +39,8 @@ DISPLAY_MODULES = {
     "Abalone": "abalone_display",
     "Amazons": "amazons_display",
     "Arimaa": "arimaa_display",
+    "BaghChal": "bagh_chal_display",
+    "Bao": "bao_display",
     "Bashni": "bashni_display",
     "Entrapment": "entrapment_display",
     "Havannah": "havannah_display",
