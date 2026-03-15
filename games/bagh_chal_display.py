@@ -31,7 +31,7 @@ except ImportError:
 # ── Display Constants ────────────────────────────────────────────────────────
 
 CELL = 120
-MARGIN = 70
+MARGIN = 85
 BOARD_PX = CELL * 4
 PANEL_W = 260
 WIN_W = MARGIN + BOARD_PX + MARGIN + PANEL_W

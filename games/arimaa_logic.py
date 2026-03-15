@@ -5,6 +5,7 @@ No Pygame imports.  Players: 1 = Gold, 2 = Silver.
 """
 
 import copy
+import math
 
 try:
     from games.base_game import AbstractBoardGame
@@ -366,6 +367,95 @@ class ArimaaLogic(AbstractBoardGame):
                 if cnt < 2:
                     moves.append(["end_turn"])
         return moves
+
+    # ── Evaluation hook ─────────────────────────────────────────────────
+
+    PIECE_VALUE = {
+        "E": 100, "M": 50, "H": 30, "D": 18, "C": 15, "R": 10,
+        "e": 100, "m": 50, "h": 30, "d": 18, "c": 15, "r": 10,
+    }
+
+    def evaluate_position(self, state, player):
+        """Evaluate from *player*'s perspective using Arimaa-specific features."""
+        if state["phase"] != "play":
+            return None  # setup — decline
+
+        board = state["board"]
+        opp = self._enemy(player)
+
+        # Rank helpers — Gold advances toward row 7, Silver toward row 0
+        own_rabbit = "R" if player == 1 else "r"
+        opp_rabbit = "r" if player == 1 else "R"
+        # "rank 7" = one step from goal row
+        own_r7_row = 6 if player == 1 else 1
+        own_goal_row = 7 if player == 1 else 0
+        opp_r7_row = 1 if player == 1 else 6
+        opp_goal_row = 0 if player == 1 else 7
+
+        # ── Priority 1: Goal threat override ──────────────────────────
+        for c in range(8):
+            if board[own_r7_row][c] == own_rabbit:
+                if board[own_goal_row][c] is None:
+                    return 0.98
+        for c in range(8):
+            if board[opp_r7_row][c] == opp_rabbit:
+                if board[opp_goal_row][c] is None:
+                    return 0.02
+
+        # ── Priority 2: Trap control ──────────────────────────────────
+        trap_control = 0
+        for trap in self.TRAPS:
+            tr, tc = trap[0], trap[1]
+            own_adj = 0
+            opp_adj = 0
+            for d in self.DIRS:
+                nr, nc = tr + d[0], tc + d[1]
+                if 0 <= nr < 8 and 0 <= nc < 8:
+                    piece = board[nr][nc]
+                    if piece is not None:
+                        if self._is_own(piece, player):
+                            own_adj += 1
+                        else:
+                            opp_adj += 1
+            trap_control += own_adj - opp_adj
+
+        # ── Priority 3-5: Material, frozen, advancement ───────────────
+        own_material = 0
+        opp_material = 0
+        own_frozen = 0
+        own_max_rank = 0
+
+        for r in range(8):
+            for c in range(8):
+                piece = board[r][c]
+                if piece is None:
+                    continue
+                val = self.PIECE_VALUE[piece]
+                if self._is_own(piece, player):
+                    own_material += val
+                    if self._is_frozen(board, r, c):
+                        own_frozen += 1
+                    # Rabbit advancement (own side only)
+                    if piece == own_rabbit:
+                        if player == 1:
+                            rank = r + 1
+                        else:
+                            rank = 8 - r
+                        if rank > own_max_rank:
+                            own_max_rank = rank
+                else:
+                    opp_material += val
+
+        material_diff = own_material - opp_material
+        rabbit_adv = own_max_rank if own_max_rank > 4 else 0
+
+        score = (trap_control * 3
+                 + material_diff * 2
+                 - own_frozen * 1
+                 + rabbit_adv * 0.5)
+
+        x = max(-20.0, min(20.0, score / 100.0))
+        return 1.0 / (1.0 + math.exp(-x))
 
     # ── Move application ────────────────────────────────────────────────
 

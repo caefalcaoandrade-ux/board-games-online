@@ -12,6 +12,7 @@ A move is represented as two [row, col] pairs::
 """
 
 import copy
+import math
 from collections import deque
 
 try:
@@ -517,6 +518,86 @@ class HnefataflLogic(AbstractBoardGame):
         if not state["game_over"]:
             return {"is_over": False, "winner": None, "is_draw": False}
         return {"is_over": True, "winner": state["winner"], "is_draw": False}
+
+    # ── Evaluation hook ────────────────────────────────────────────────
+
+    def evaluate_position(self, state, player):
+        """Evaluate from *player*'s perspective (asymmetric: attacker vs defender)."""
+        if state["game_over"]:
+            return 1.0 if state["winner"] == player else 0.0
+
+        board = state["board"]
+        kr, kc = _find_king(board)
+        if kr is None:
+            return 1.0 if player == PLAYER_ATTACKER else 0.0
+
+        # Piece counts
+        atk_count = 0
+        def_count = 0
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                p = board[r][c]
+                if p == ATTACKER:
+                    atk_count += 1
+                elif p in (DEFENDER, KING):
+                    def_count += 1
+
+        # King distance to nearest corner (Manhattan)
+        min_king_dist = 20
+        for cr, cc in _CORNERS:
+            d = abs(kr - cr) + abs(kc - cc)
+            if d < min_king_dist:
+                min_king_dist = d
+
+        # King escape routes: unobstructed straight-line paths to any corner
+        escape_routes = 0
+        guaranteed_escape = False
+        for cr, cc in _CORNERS:
+            if kr == cr:
+                c_lo, c_hi = min(kc, cc), max(kc, cc)
+                clear = True
+                for c in range(c_lo + 1, c_hi):
+                    if board[kr][c] != EMPTY:
+                        clear = False
+                        break
+                if clear and c_hi > c_lo:
+                    escape_routes += 1
+                    guaranteed_escape = True
+            if kc == cc:
+                r_lo, r_hi = min(kr, cr), max(kr, cr)
+                clear = True
+                for r in range(r_lo + 1, r_hi):
+                    if board[r][kc] != EMPTY:
+                        clear = False
+                        break
+                if clear and r_hi > r_lo:
+                    escape_routes += 1
+                    guaranteed_escape = True
+
+        # Attacker pieces adjacent to king
+        king_adj_attackers = 0
+        for dr, dc in _DIRS:
+            nr, nc = kr + dr, kc + dc
+            if _in_bounds(nr, nc) and board[nr][nc] == ATTACKER:
+                king_adj_attackers += 1
+
+        # Defender-perspective score
+        score = 0
+        score -= min_king_dist * 200      # closer to corner = better
+        score += escape_routes * 100      # escape routes
+        if guaranteed_escape:
+            score += 1000                 # near-win
+        score += def_count * 20           # defender material
+        score -= king_adj_attackers * 200  # capture contact
+        if escape_routes == 0:
+            score -= 800                  # king bottled up
+        score -= atk_count * 15           # attacker material
+
+        x = max(-20.0, min(20.0, score / 2000.0))
+        defender_val = 1.0 / (1.0 + math.exp(-x))
+        if player == PLAYER_DEFENDER:
+            return defender_val
+        return 1.0 - defender_val
 
     # ── Efficient override ───────────────────────────────────────────────
 

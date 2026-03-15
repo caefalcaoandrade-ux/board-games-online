@@ -52,7 +52,7 @@ FPS = 60
 
 HEX_SP   = 50          # pixel spacing between adjacent intersections
 BOARD_CX = 465         # board centre x
-BOARD_CY = 448         # board centre y
+BOARD_CY = 463         # board centre y
 
 RING_R   = 19          # ring outer radius
 RING_W   = 6           # ring annulus width

@@ -18,6 +18,7 @@ All coordinates are lists (never tuples).
 """
 
 import copy
+import math
 
 try:
     from games.base_game import AbstractBoardGame
@@ -502,6 +503,90 @@ class AbaloneLogic(AbstractBoardGame):
             "winner": None,
             "is_draw": False,
         }
+
+    # ── Evaluation hook ────────────────────────────────────────────────
+
+    def evaluate_position(self, state, player):
+        """Evaluate from *player*'s perspective using marble count, position, cohesion."""
+        if state["game_over"]:
+            return 1.0 if state["winner"] == player else 0.0
+
+        board = state["board"]
+        captured = state["captured"]
+        opp = WHITE if player == BLACK else BLACK
+
+        # Captures: how many opponent marbles each side pushed off
+        my_pushoffs = captured[str(player)]    # I pushed off this many
+        opp_pushoffs = captured[str(opp)]      # opponent pushed off this many
+
+        # Collect own and opponent marble positions
+        own_positions = []
+        opp_positions = []
+        for k, v in board.items():
+            if v == player:
+                own_positions.append(key_to_cube(k))
+            elif v == opp:
+                opp_positions.append(key_to_cube(k))
+
+        n_own = len(own_positions)
+        n_opp = len(opp_positions)
+
+        # Phase detection by total marbles pushed off
+        total_pushoffs = my_pushoffs + opp_pushoffs
+        if total_pushoffs <= 1:
+            phase_mult_marble = 1.0
+            phase_mult_position = 2.0
+        elif total_pushoffs <= 3:
+            phase_mult_marble = 1.0
+            phase_mult_position = 1.0
+        else:
+            phase_mult_marble = 100.0
+            phase_mult_position = 1.0
+
+        # Marble differential (dominant feature)
+        marble_diff = my_pushoffs - opp_pushoffs
+        score = marble_diff * 800 * phase_mult_marble
+
+        # Center distance: sum of hex distances to center (0,0,0)
+        own_center_dist = 0
+        for p in own_positions:
+            own_center_dist += max(abs(p[0]), abs(p[1]), abs(p[2]))
+        opp_center_dist = 0
+        for p in opp_positions:
+            opp_center_dist += max(abs(p[0]), abs(p[1]), abs(p[2]))
+
+        # Lower center distance is better
+        score += (opp_center_dist - own_center_dist) * 8 * phase_mult_position
+
+        # Edge exposure: marbles on outermost ring (max coord == 4)
+        own_edge = 0
+        for p in own_positions:
+            if max(abs(p[0]), abs(p[1]), abs(p[2])) == 4:
+                own_edge += 1
+        opp_edge = 0
+        for p in opp_positions:
+            if max(abs(p[0]), abs(p[1]), abs(p[2])) == 4:
+                opp_edge += 1
+
+        # Fewer edge marbles is better
+        score += (opp_edge - own_edge) * 30 * phase_mult_position
+
+        # Group cohesion: sum of pairwise distances (lower = more compact)
+        own_cohesion = 0
+        for i in range(n_own):
+            for j in range(i + 1, n_own):
+                own_cohesion += cube_dist(own_positions[i], own_positions[j])
+        opp_cohesion = 0
+        for i in range(n_opp):
+            for j in range(i + 1, n_opp):
+                opp_cohesion += cube_dist(opp_positions[i], opp_positions[j])
+
+        # Lower cohesion sum is better
+        score += (opp_cohesion - own_cohesion) * 3 * phase_mult_position
+
+        # Sigmoid normalization (clamp to avoid overflow)
+        x = max(-20.0, min(20.0, score / 500.0))
+        return 1.0 / (1.0 + math.exp(-x))
 
     def is_valid_move(self, state, player, move):
         """Validate a single move without enumerating all legal moves."""

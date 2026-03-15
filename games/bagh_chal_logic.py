@@ -5,6 +5,7 @@ No Pygame imports.  Player 1 = Goats, Player 2 = Tigers.
 """
 
 import copy
+import math
 
 try:
     from games.base_game import AbstractBoardGame
@@ -186,6 +187,82 @@ class BaghChalLogic(AbstractBoardGame):
                     continue
                 moves.append({"type": "capture", "from": i, "over": nb, "to": dest})
         return moves
+
+    # ── Evaluation hook ─────────────────────────────────────────────
+
+    def evaluate_position(self, state, player):
+        """Evaluate from *player*'s perspective using piece counts and mobility."""
+        board = state["board"]
+        captured = state["goats_captured"]
+        reserve = state["goats_in_reserve"]
+
+        # Terminal-ish: 5 captures = tiger win
+        if captured >= 5:
+            return 0.0 if player == PLAYER_GOAT else 1.0
+
+        # Compute tiger mobility, captures, and trapped count via adjacency
+        tiger_mobility = 0
+        available_captures = 0
+        trapped_tigers = 0
+        for i in range(25):
+            if board[i] != TIGER:
+                continue
+            adj_empty = 0
+            for nb in ADJACENCY[i]:
+                if board[nb] == EMPTY:
+                    adj_empty += 1
+                elif board[nb] == GOAT:
+                    # Check if capture is possible (empty landing beyond)
+                    r_o, c_o = i // 5, i % 5
+                    r_i, c_i = nb // 5, nb % 5
+                    r_d = 2 * r_i - r_o
+                    c_d = 2 * c_i - c_o
+                    if 0 <= r_d <= 4 and 0 <= c_d <= 4:
+                        dest = 5 * r_d + c_d
+                        if board[dest] == EMPTY and dest in ADJACENCY[nb]:
+                            available_captures += 1
+            tiger_mobility += adj_empty
+            if adj_empty == 0:
+                trapped_tigers += 1
+
+        # All tigers trapped = goat win
+        if trapped_tigers == 4:
+            return 1.0 if player == PLAYER_GOAT else 0.0
+
+        # Tiger-perspective score
+        score = (captured * 500
+                 + tiger_mobility * 15
+                 + available_captures * 50
+                 - trapped_tigers * 100)
+
+        # Placement phase penalty: goats adjacent to tigers with capture behind
+        if reserve > 0:
+            vulnerable_goats = 0
+            for i in range(25):
+                if board[i] != GOAT:
+                    continue
+                for nb in ADJACENCY[i]:
+                    if board[nb] == TIGER:
+                        # Is there an empty landing beyond goat from tiger?
+                        r_t, c_t = nb // 5, nb % 5
+                        r_g, c_g = i // 5, i % 5
+                        r_d = 2 * r_g - r_t
+                        c_d = 2 * c_g - c_t
+                        if 0 <= r_d <= 4 and 0 <= c_d <= 4:
+                            dest = 5 * r_d + c_d
+                            if board[dest] == EMPTY and dest in ADJACENCY[i]:
+                                vulnerable_goats += 1
+                                break
+            score += vulnerable_goats * 30
+
+        # Sigmoid normalization
+        x = max(-20.0, min(20.0, score / 300.0))
+        tiger_val = 1.0 / (1.0 + math.exp(-x))
+
+        # Return from requested player's perspective
+        if player == PLAYER_TIGER:
+            return tiger_val
+        return 1.0 - tiger_val
 
     def _filter_repetition(self, state, moves, player):
         """Remove moves that would create a position already in history."""

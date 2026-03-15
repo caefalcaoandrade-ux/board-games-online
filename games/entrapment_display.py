@@ -41,8 +41,8 @@ GW   = 14                                   # groove width (px)
 CELL = SQ + GW                              # pitch origin-to-origin
 BOARD_PX = COLS * SQ + (COLS - 1) * GW      # 644
 
-BOARD_X = 62                                # left margin for labels
-BOARD_Y = 50                                # top margin for labels
+BOARD_X = 78                                # left margin for labels
+BOARD_Y = 66                                # top margin for labels
 
 INFO_X = BOARD_X + BOARD_PX + 34
 INFO_W = 350

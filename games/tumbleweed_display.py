@@ -34,7 +34,7 @@ except ImportError:
 HEX_R = 27          # hex circumradius in pixels
 WIN_W, WIN_H = 1340, 930
 BOARD_CX = 395      # board centre x (centred in non-panel area)
-BOARD_CY = 440      # board centre y
+BOARD_CY = 455      # board centre y
 PANEL_LEFT = 790    # info-panel left edge
 FPS = 60
 

@@ -21,6 +21,7 @@ Win conditions:
 """
 
 import copy
+import math
 from collections import deque
 
 try:
@@ -368,6 +369,133 @@ class HavannahLogic(AbstractBoardGame):
                         "is_draw": False}
             return {"is_over": True, "winner": None, "is_draw": True}
         return {"is_over": False, "winner": None, "is_draw": False}
+
+    # ── Evaluation hook ────────────────────────────────────────────────
+
+    def evaluate_position(self, state, player):
+        """Rough evaluation for Havannah using group connectivity analysis."""
+        if state["game_over"]:
+            if state["winner"] is None:
+                return 0.5
+            return 1.0 if state["winner"] == player else 0.0
+
+        board = state["board"]
+        opp = BLACK if player == WHITE else WHITE
+        geo = self._geo
+        if state.get("size") != self._size:
+            geo = _precompute_geometry(state["size"])
+
+        corner_idx = geo["corner_index"]
+        side_idx = geo["side_index"]
+        neighbors = geo["neighbors"]
+
+        score = 0
+
+        for side, sign in ((player, 1), (opp, -1)):
+            # Collect occupied cells
+            occupied = set()
+            for k, v in board.items():
+                if v == side:
+                    occupied.add(tuple(key_to_cell(k)))
+
+            if not occupied:
+                continue
+
+            # Build connected components via BFS
+            visited = set()
+            comp_id = 0
+            cell_comp = {}        # (q,r) -> comp_id
+            comp_corners = {}     # comp_id -> set of corner indices
+            comp_edges = {}       # comp_id -> set of edge indices
+            comp_size = {}        # comp_id -> int
+            best_comp_score = 0
+
+            for start in occupied:
+                if start in visited:
+                    continue
+                cid = comp_id
+                comp_id += 1
+                c_corners = set()
+                c_edges = set()
+                queue = deque([start])
+                visited.add(start)
+                size = 0
+                while queue:
+                    cur = queue.popleft()
+                    size += 1
+                    cell_comp[cur] = cid
+                    if cur in corner_idx:
+                        c_corners.add(corner_idx[cur])
+                    if cur in side_idx:
+                        c_edges.add(side_idx[cur])
+                    for nb in neighbors.get(cur, []):
+                        if nb in occupied and nb not in visited:
+                            visited.add(nb)
+                            queue.append(nb)
+
+                comp_corners[cid] = c_corners
+                comp_edges[cid] = c_edges
+                comp_size[cid] = size
+
+                # Near-ring: empty cell with >=4 component neighbors
+                near_ring = 0
+                if size >= 5:
+                    checked = set()
+                    for qr in list(visited)[-size:]:
+                        if cell_comp.get(qr) != cid:
+                            continue
+                        for nb in neighbors.get(qr, []):
+                            if nb in occupied or nb in checked:
+                                continue
+                            checked.add(nb)
+                            cn = 0
+                            for nb2 in neighbors.get(nb, []):
+                                if cell_comp.get(nb2) == cid:
+                                    cn += 1
+                            if cn >= 4:
+                                near_ring = 2
+                                break
+                            elif cn >= 3:
+                                near_ring = max(near_ring, 1)
+                        if near_ring == 2:
+                            break
+
+                cs = (len(c_edges) * 100
+                      + len(c_corners) * 80
+                      + near_ring * 150)
+                best_comp_score = max(best_comp_score, cs)
+
+            score += sign * best_comp_score
+
+            # Decisive move detection: single placement that wins
+            checked_cells = set()
+            for qr in occupied:
+                for nb in neighbors.get(qr, []):
+                    if nb in occupied or nb in checked_cells:
+                        continue
+                    checked_cells.add(nb)
+                    # Merge corner/edge sets of all adjacent components
+                    adj_comps = set()
+                    for nb2 in neighbors.get(nb, []):
+                        if nb2 in cell_comp:
+                            adj_comps.add(cell_comp[nb2])
+                    if not adj_comps:
+                        continue
+                    mc = set()
+                    me = set()
+                    for cid in adj_comps:
+                        mc |= comp_corners[cid]
+                        me |= comp_edges[cid]
+                    if nb in corner_idx:
+                        mc.add(corner_idx[nb])
+                    if nb in side_idx:
+                        me.add(side_idx[nb])
+                    if len(mc) >= 2 or len(me) >= 3:
+                        score += sign * 800
+                        break  # one threat is enough
+
+        x = max(-20.0, min(20.0, score / 400.0))
+        return 1.0 / (1.0 + math.exp(-x))
 
     # ── Efficient override ───────────────────────────────────────────────
 

@@ -276,7 +276,7 @@ class Renderer:
         sqrt3 = math.sqrt(3)
 
         self.win_w, self.win_h = screen.get_size()
-        margin = 70
+        margin = 85
         self.panel_w = 230
 
         board_w = sqrt3 * hs * (2 * S - 1) + hs
@@ -695,7 +695,7 @@ def run_online(screen, net, my_player, initial_state):
     board_w = sqrt3 * hs * (2 * S - 1) + hs
     board_h = 1.5 * hs * (2 * S - 1) + hs
 
-    margin = 70
+    margin = 85
     panel_w = 230
     win_w = int(board_w + 2 * margin + panel_w)
     win_h = int(max(board_h + 2 * margin + 10, 680))
@@ -788,7 +788,7 @@ def main(board_size=DEFAULT_SIZE):
     board_w = sqrt3 * hs * (2 * S - 1) + hs
     board_h = 1.5 * hs * (2 * S - 1) + hs
 
-    margin = 70
+    margin = 85
     panel_w = 230
     win_w = int(board_w + 2 * margin + panel_w)
     win_h = int(max(board_h + 2 * margin + 10, 680))

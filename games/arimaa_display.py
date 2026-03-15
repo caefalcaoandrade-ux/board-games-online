@@ -27,7 +27,7 @@ BOARD_PX = CELL * 8
 PANEL_X = BOARD_OFF_X + BOARD_PX + 20
 PANEL_W = 280
 WIN_W = PANEL_X + PANEL_W + 10
-WIN_H = BOARD_OFF_Y + BOARD_PX + 44
+WIN_H = BOARD_OFF_Y + BOARD_PX + 66
 
 COL_BG        = (30, 30, 36)
 COL_LIGHT     = (240, 217, 181)
@@ -663,7 +663,7 @@ class Renderer:
             name = "Gold" if game.my_player == 1 else "Silver"
             acol = COL_GOLD_P if game.my_player == 1 else COL_SILVER_P
             tag = self.fhint.render(f"You: {name}", True, acol)
-            scr.blit(tag, (PANEL_X + PANEL_W - tag.get_width(),
+            scr.blit(tag, (PANEL_X + 14,
                            WIN_H - 28))
 
     def _draw_setup_palette(self, game, x0, y0):

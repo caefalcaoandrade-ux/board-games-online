@@ -333,6 +333,54 @@ class AbstractBoardGame(ABC):
         """
         ...
 
+    # ── Optional evaluation hook ─────────────────────────────────────
+
+    def evaluate_position(self, state: dict, player: int):
+        """Evaluate the position from *player*'s perspective.
+
+        Returns a float between 0.0 and 1.0, or ``None``.
+
+        - ``0.0`` — certain loss for *player*
+        - ``0.5`` — even position
+        - ``1.0`` — certain win for *player*
+        - ``None`` — no specialized evaluation available (the bot will
+          fall back to its generic game-agnostic evaluation)
+
+        The default implementation returns ``None``.  Games may override
+        this to provide domain-specific positional evaluation that
+        dramatically improves bot play quality.
+
+        **Performance**
+
+        This method is called **thousands of times per second** during
+        MCTS playouts.  It **must be fast**.  Use direct state inspection
+        only: iterate the board, count pieces, check positions, compute
+        simple ratios.  **Never** call ``get_legal_moves``,
+        ``apply_move``, ``get_game_status``, or any other expensive
+        method from inside this function — doing so will reduce the
+        bot's search speed by orders of magnitude and make it weaker,
+        not stronger.
+
+        Returning ``None`` is always safe and simply causes the bot to
+        use its built-in generic evaluation (mobility-based).  A poor
+        evaluation that returns inaccurate scores is **worse** than
+        returning ``None``, so only implement this when you can provide
+        a meaningful signal.
+
+        Parameters
+        ----------
+        state : dict
+            The current game state.
+        player : int
+            The player to evaluate for (``1`` or ``2``).
+
+        Returns
+        -------
+        float or None
+            Position score in ``[0.0, 1.0]``, or ``None`` to decline.
+        """
+        return None
+
     # ── Validation & enforcement utilities ──────────────────────────
 
     @staticmethod

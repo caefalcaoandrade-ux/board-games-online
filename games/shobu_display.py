@@ -51,8 +51,8 @@ GAP_X     = 100
 GAP_Y     = 150
 PAD_L     = 74
 PAD_R     = 42
-PAD_TOP   = 140
-PAD_BOT   = 64
+PAD_TOP   = 160
+PAD_BOT   = 80
 
 WIN_W = PAD_L + BOARD_PX * 2 + GAP_X + PAD_R
 WIN_H = PAD_TOP + BOARD_PX * 2 + GAP_Y + PAD_BOT

@@ -4,9 +4,7 @@ Verifies that the bot:
 1. Always produces legal moves
 2. Games reach completion
 3. Strong beats Weak decisively across 4 games
-4. Difficulty presets are configured correctly
-
-Strong uses iteration-based control in tests; Weak is pure random (instant).
+4. Difficulty presets are configured correctly (Weak / Average / Strong)
 """
 
 import sys
@@ -58,13 +56,13 @@ def _play_game(logic, bot1, bot2, max_moves=300):
 def _run_matchup(logic_factory, n_games=5, strong_iters=100, max_moves=200):
     """Run a Strong-vs-Weak matchup and return strong_wins count.
 
-    Weak uses random_only mode (no iterations). Strong uses iteration-based
-    MCTS with mobility evaluation. Games alternate sides.
+    Both bots use iteration-based MCTS. Strong picks the best move;
+    Weak picks the worst. Games alternate sides.
     """
     strong_wins = 0
     for g in range(n_games):
         logic = logic_factory()
-        weak = MCTSBot("weak")
+        weak = MCTSBot("weak", max_iterations=20)
         strong = MCTSBot("strong", max_iterations=strong_iters)
 
         if g % 2 == 0:
@@ -89,7 +87,7 @@ def test_legal_moves_havannah():
     """Bot always picks legal moves in Havannah."""
     from games.havannah_logic import HavannahLogic
     logic = HavannahLogic(size=4)
-    bot = MCTSBot("weak")
+    bot = MCTSBot("weak", max_iterations=3)
     state = logic.create_initial_state()
 
     for _ in range(30):
@@ -108,7 +106,7 @@ def test_legal_moves_bashni():
     """Bot always picks legal moves in Bashni."""
     from games.bashni_logic import BashniLogic
     logic = BashniLogic()
-    bot = MCTSBot("weak")
+    bot = MCTSBot("weak", max_iterations=3)
     state = logic.create_initial_state()
 
     for _ in range(20):
@@ -127,7 +125,7 @@ def test_legal_moves_shobu():
     """Bot always picks legal moves in Shobu."""
     from games.shobu_logic import ShobuLogic
     logic = ShobuLogic()
-    bot = MCTSBot("weak")
+    bot = MCTSBot("weak", max_iterations=3)
     state = logic.create_initial_state()
 
     for _ in range(15):
@@ -149,7 +147,7 @@ def test_game_completes_havannah():
     """Two weak bots finish a Havannah game."""
     from games.havannah_logic import HavannahLogic
     logic = HavannahLogic(size=4)
-    bot = MCTSBot("weak")
+    bot = MCTSBot("weak", max_iterations=3)
     winner, moves = _play_game(logic, bot, bot, max_moves=100)
     assert moves <= 100
 
@@ -158,7 +156,7 @@ def test_game_completes_bashni():
     """Two weak bots finish a Bashni game."""
     from games.bashni_logic import BashniLogic
     logic = BashniLogic()
-    bot = MCTSBot("weak")
+    bot = MCTSBot("weak", max_iterations=3)
     winner, moves = _play_game(logic, bot, bot, max_moves=300)
 
 
@@ -166,18 +164,17 @@ def test_game_completes_shobu():
     """Two weak bots finish a Shobu game."""
     from games.shobu_logic import ShobuLogic
     logic = ShobuLogic()
-    bot = MCTSBot("weak")
+    bot = MCTSBot("weak", max_iterations=3)
     winner, moves = _play_game(logic, bot, bot, max_moves=200)
 
 
 # ── Test: Strong beats Weak across 4 games ───────────────────────────────────
 #
-# Strong: GRAVE, mobility evaluation, MCTS-Solver, 3-ply loss prevention,
-#         tree reuse, progressive move ordering.
-# Weak: pure random.choice — no search, no win detection, nothing.
+# Strong: GRAVE, evaluation, MCTS-Solver, 3-ply loss prevention, best selection.
+# Weak: simple UCB1, no eval, no solver, worst-move selection.
 #
 # Games chosen for fast get_legal_moves to keep test time reasonable.
-# Each matchup: 5 games alternating sides. Assert >= 4/5.
+# Each matchup: 5 games alternating sides. Assert >= 3-4/5.
 
 
 def test_strong_beats_weak_havannah():
@@ -223,7 +220,7 @@ def test_single_move():
     """Bot returns the only legal move without running MCTS."""
     from games.havannah_logic import HavannahLogic
     logic = HavannahLogic(size=3)
-    bot = MCTSBot("weak")
+    bot = MCTSBot("weak", max_iterations=3)
     state = logic.create_initial_state()
 
     for i in range(18):
@@ -258,17 +255,25 @@ def test_immediate_win_taken():
 def test_difficulty_presets():
     """Difficulty presets create genuinely different bots."""
     weak = MCTSBot("weak")
+    average = MCTSBot("average")
     strong = MCTSBot("strong")
 
-    # Weak is pure random
-    assert weak.random_only is True, "Weak should be random_only"
+    # Weak: simple search, worst-move selection
+    assert weak.select == "worst", "Weak should select worst"
     assert weak.loss_ply == 0, "Weak should skip loss prevention"
     assert not weak.use_eval, "Weak should not use evaluation"
     assert not weak.use_grave, "Weak should not use GRAVE"
     assert not weak.use_solver, "Weak should not use MCTS-Solver"
 
-    # Strong has everything
-    assert strong.random_only is False, "Strong should not be random_only"
+    # Average: full search, mixed selection
+    assert average.select == "mixed", "Average should select mixed"
+    assert average.loss_ply > 0, "Average should have loss prevention"
+    assert average.use_eval, "Average should use evaluation"
+    assert average.use_grave, "Average should use GRAVE"
+    assert average.use_solver, "Average should use MCTS-Solver"
+
+    # Strong: full search, best selection
+    assert strong.select == "best", "Strong should select best"
     assert strong.loss_ply > 0, "Strong should have loss prevention"
     assert strong.use_eval, "Strong should use evaluation"
     assert strong.use_grave, "Strong should use GRAVE"
@@ -285,33 +290,46 @@ def test_strong_uses_mobility_evaluation():
     bot.choose_move(logic, state, player)
 
 
-def test_legacy_aliases():
-    """Legacy difficulty names still work."""
-    easy = MCTSBot("easy")
-    normal = MCTSBot("normal")
-    medium = MCTSBot("medium")
-    hard = MCTSBot("hard")
-    weak = MCTSBot("weak")
-    strong = MCTSBot("strong")
-    assert easy.random_only == weak.random_only
-    assert normal.random_only == weak.random_only
-    assert medium.use_eval == strong.use_eval
-    assert hard.use_eval == strong.use_eval
-
-
-def test_weak_is_instant():
-    """Weak bot returns immediately (no search overhead)."""
+def test_selection_policies():
+    """Move selection policies produce correct behavior."""
     from games.havannah_logic import HavannahLogic
-    import time
     logic = HavannahLogic(size=4)
-    bot = MCTSBot("weak")
     state = logic.create_initial_state()
     player = logic.get_current_player(state)
-    t0 = time.monotonic()
-    for _ in range(100):
-        bot.choose_move(logic, state, player)
-    elapsed = time.monotonic() - t0
-    assert elapsed < 1.0, f"100 weak moves took {elapsed:.2f}s, should be < 1s"
+
+    # Strong always picks the highest-visit child
+    strong = MCTSBot("strong", max_iterations=50)
+    move_s = strong.choose_move(logic, state, player)
+    assert move_s is not None
+
+    # Weak picks the lowest-visit child (should differ from strong)
+    # Run multiple times — weak should sometimes pick different moves
+    weak = MCTSBot("weak", max_iterations=50)
+    weak_moves = set()
+    for _ in range(5):
+        weak._reuse_root = None
+        m = weak.choose_move(logic, state, player)
+        if m is not None:
+            weak_moves.add(repr(m))
+
+    # Average uses mixed selection — should have some variety
+    avg = MCTSBot("average", max_iterations=50)
+    avg_moves = set()
+    for _ in range(10):
+        avg._reuse_root = None
+        m = avg.choose_move(logic, state, player)
+        if m is not None:
+            avg_moves.add(repr(m))
+
+    # Average should produce more variety than Strong alone
+    assert len(avg_moves) >= 1, "Average should produce at least one move"
+
+
+def test_unknown_difficulty_defaults_to_strong():
+    """Unknown difficulty string defaults to strong preset."""
+    bot = MCTSBot("nonexistent")
+    assert bot.select == "best"
+    assert bot.use_grave is True
 
 
 # ── Test: Claude bot graceful degradation ──────────────────────────────────

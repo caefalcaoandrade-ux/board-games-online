@@ -300,17 +300,45 @@ def _format_moves(moves):
 # ── Claude Bot ───────────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = (
-    "You are an expert abstract strategy board game player. "
-    "You always think carefully about tactics, threats, captures, "
-    "territory, and long-term positioning before choosing a move. "
-    "When given a position and list of legal moves, analyze the "
-    "position briefly, then respond with ONLY the number of your "
-    "chosen move on the last line. Example: if you choose move 5, "
-    "your last line should be just: 5"
+    "You are a world-class abstract strategy game analyst. You think "
+    "concretely and tactically, never in vague generalities. For any "
+    "abstract strategy game, you evaluate positions by: counting material "
+    "and pieces for each side, measuring who controls more territory or "
+    "board space, assessing which pieces are safe versus vulnerable, "
+    "detecting immediate threats (can the opponent win, capture, or create "
+    "an unstoppable advantage next turn), and identifying forcing moves "
+    "(captures, pushes, surrounding moves, connection completions, "
+    "territory gains) that demand the opponent respond. You always "
+    "consider what the opponent will do after your move. You never choose "
+    "a move without first identifying the most urgent threat on the board "
+    "and verifying your chosen move addresses it. You prefer moves that "
+    "create concrete, measurable advantages over moves that merely look "
+    "reasonable."
+)
+
+_ANALYSIS_INSTRUCTIONS = (
+    "Analyze this position step by step before choosing.\n"
+    "(1) Assess the position: count the key metrics for each player — "
+    "pieces, territory, threats, vulnerable positions, proximity to any "
+    "win condition. State specific numbers.\n"
+    "(2) Identify the most urgent threat: what is the most dangerous thing "
+    "the opponent can do next turn if you ignore it? Name it concretely. "
+    "If there is no urgent threat, state that.\n"
+    "(3) Identify your best opportunity: what is the most forcing or "
+    "advantageous move available to you — a capture, a push, a surrounding "
+    "move, a territory gain, a win-condition advance, a threat creation? "
+    "Name it concretely.\n"
+    "(4) Evaluate your top 3 candidate moves by number: for each, state "
+    "what happens immediately after and what the opponent's best response "
+    "would be.\n"
+    "(5) Choose the move that prevents the biggest danger or creates the "
+    "biggest concrete advantage. End your response with exactly MOVE: X "
+    "where X is the number of your chosen move."
 )
 
 _DEFAULT_MODEL = "claude-sonnet-4-20250514"
-_MAX_TOKENS = 1024
+_MAX_TOKENS = 2000
+_API_TIMEOUT = 30.0  # seconds
 
 
 class ClaudeBot:
@@ -374,8 +402,7 @@ class ClaudeBot:
         prompt = (
             f"{state_text}\n\n"
             f"Legal moves ({len(moves)} available):\n{moves_text}\n\n"
-            f"Which move do you choose? Analyze briefly, then give "
-            f"ONLY the move number on the final line."
+            f"{_ANALYSIS_INSTRUCTIONS}"
         )
 
         # Try to get a valid move number from Claude
@@ -384,16 +411,14 @@ class ClaudeBot:
         if chosen is not None:
             return moves[chosen]
 
-        # Retry with a simpler prompt
-        for _ in range(2):
-            retry_prompt = (
-                f"You are playing {game_name} as player {player}.\n"
-                f"Pick one move from 1 to {len(moves)}.\n"
-                f"Respond with ONLY the number."
-            )
-            chosen = self._ask_claude(client, retry_prompt, len(moves))
-            if chosen is not None:
-                return moves[chosen]
+        # Retry with a focused extraction prompt
+        retry_prompt = (
+            "Respond with only MOVE: followed by the number of your "
+            "chosen move, nothing else."
+        )
+        chosen = self._ask_claude(client, retry_prompt, len(moves))
+        if chosen is not None:
+            return moves[chosen]
 
         # All retries failed — permanently switch to MCTS
         self.switched_to_fallback = True
@@ -405,11 +430,13 @@ class ClaudeBot:
         Returns the 0-based index, or None if parsing fails.
         """
         try:
+            import httpx
             response = client.messages.create(
                 model=self.model,
                 max_tokens=_MAX_TOKENS,
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}],
+                timeout=httpx.Timeout(_API_TIMEOUT),
             )
             text = response.content[0].text.strip()
             return self._parse_move_number(text, n_moves)
@@ -419,18 +446,25 @@ class ClaudeBot:
     def _parse_move_number(self, text, n_moves):
         """Extract a move number from Claude's response.
 
+        Looks for the last ``MOVE: X`` pattern. Falls back to the last
+        bare integer on its own line if no MOVE: tag is found.
+
         Returns the 0-based index (0 to n_moves-1), or None.
         """
-        # Take the last line that contains a number
+        # Primary: find last "MOVE:" tag
+        matches = re.findall(r'MOVE:\s*(\d+)', text, re.IGNORECASE)
+        if matches:
+            num = int(matches[-1])
+            return max(0, min(n_moves - 1, num - 1))
+
+        # Fallback: last line containing a bare integer
         for line in reversed(text.strip().splitlines()):
             line = line.strip()
-            # Extract all numbers from the line
             numbers = re.findall(r'\d+', line)
             if numbers:
                 num = int(numbers[-1])
                 if 1 <= num <= n_moves:
                     return num - 1
-                # Out of range — clamp to closest valid
                 if num < 1:
                     return 0
                 if num > n_moves:

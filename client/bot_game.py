@@ -173,7 +173,7 @@ def run_vs_bot(screen, game_name, difficulty):
     game_name : str
         Name of the game (must be in the registry).
     difficulty : str
-        "weak", "strong", or "expert".
+        "weak", "average", "strong", or "claude".
 
     Returns when the game ends or the user closes the window.
     """
@@ -181,7 +181,7 @@ def run_vs_bot(screen, game_name, difficulty):
     from client.lobby import _load_dispatch, _ONLINE_DISPATCH
 
     logic = create_game(game_name)
-    if difficulty == "expert":
+    if difficulty == "claude":
         bot = ClaudeBot()
     else:
         bot = MCTSBot(difficulty)

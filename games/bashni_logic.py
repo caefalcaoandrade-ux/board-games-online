@@ -27,6 +27,7 @@ interface.
 """
 
 import copy
+import math
 
 try:
     from games.base_game import AbstractBoardGame
@@ -541,6 +542,103 @@ class BashniLogic(AbstractBoardGame):
             }
 
         return {"is_over": False, "winner": None, "is_draw": False}
+
+    # ── Evaluation hook ─────────────────────────────────────────────────
+
+    def evaluate_position(self, state, player):
+        """Evaluate from *player*'s perspective using stack features."""
+        board = state["board"]
+        color = PLAYER_TO_COLOR[player]
+        opp_c = opponent_color(color)
+
+        own_stacks = 0
+        opp_stacks = 0
+        own_kings = 0
+        opp_kings = 0
+        own_prisoners = 0    # own pieces buried under opponent stacks
+        opp_prisoners = 0    # opponent pieces buried under own stacks
+        own_comp = 0
+        opp_comp = 0
+        own_center = 0
+        opp_center = 0
+        own_adv = 0.0
+        opp_adv = 0.0
+        lib_penalty = 0
+
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                col = board[r][c]
+                if col is None:
+                    continue
+                top = col[-1]
+                tc = top[0]
+                is_center = 3 <= r <= 6 and 3 <= c <= 6
+
+                if tc == color:
+                    own_stacks += 1
+                    if top[1] == KING:
+                        own_kings += 1
+                    if is_center:
+                        own_center += 1
+                    # Advancement toward promotion row
+                    if color == W:
+                        own_adv += 20 + 60.0 * r / 9.0
+                    else:
+                        own_adv += 20 + 60.0 * (9 - r) / 9.0
+                    # Composition depth: consecutive friendly from top
+                    depth = 0
+                    for i in range(len(col) - 1, -1, -1):
+                        if col[i][0] == color:
+                            depth += 1
+                        else:
+                            break
+                    own_comp += depth
+                    # Prisoners: opponent pieces in own stack
+                    for p in col:
+                        if p[0] == opp_c:
+                            opp_prisoners += 1
+                    # Liberation threat: only 1 friendly on top, >=2 enemies below
+                    if depth == 1 and len(col) >= 3:
+                        enemies = sum(1 for p in col[:-1] if p[0] == opp_c)
+                        if enemies >= 2:
+                            lib_penalty += enemies * 100
+                else:
+                    opp_stacks += 1
+                    if top[1] == KING:
+                        opp_kings += 1
+                    if is_center:
+                        opp_center += 1
+                    if opp_c == W:
+                        opp_adv += 20 + 60.0 * r / 9.0
+                    else:
+                        opp_adv += 20 + 60.0 * (9 - r) / 9.0
+                    depth = 0
+                    for i in range(len(col) - 1, -1, -1):
+                        if col[i][0] == opp_c:
+                            depth += 1
+                        else:
+                            break
+                    opp_comp += depth
+                    for p in col:
+                        if p[0] == color:
+                            own_prisoners += 1
+
+        if own_stacks == 0:
+            return 0.0
+        if opp_stacks == 0:
+            return 1.0
+
+        score = (
+            (own_stacks - opp_stacks) * 1000
+            + (own_kings - opp_kings) * 500
+            + (opp_prisoners - own_prisoners) * 200
+            + (own_comp - opp_comp) * 150
+            + (own_center - opp_center) * 30
+            + (own_adv - opp_adv)
+            - lib_penalty
+        )
+        x = max(-20.0, min(20.0, score / 2000.0))
+        return 1.0 / (1.0 + math.exp(-x))
 
     # ── Extra helpers for display module ─────────────────────────────────
 

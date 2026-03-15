@@ -34,13 +34,14 @@ except ImportError:
 # ── Display Constants ────────────────────────────────────────────────────────
 
 SQ = 66                         # square pixel size
-MARGIN = 32                     # coordinate label gutter
+MARGIN = 38                     # coordinate label gutter
 PANEL_W = 210                   # right-side column inspector width
 INFO_H = 48                     # bottom info bar height
+INFO_GAP = 20                   # gap between board bottom and info bar
 
 BOARD_PX = BOARD_N * SQ
 WIN_W = MARGIN + BOARD_PX + MARGIN + PANEL_W
-WIN_H = MARGIN + BOARD_PX + INFO_H
+WIN_H = MARGIN + BOARD_PX + INFO_GAP + INFO_H
 
 FPS = 60
 
@@ -644,7 +645,7 @@ def draw_board(surf, game, fonts, flipped=False):
     draw_panel(surf, game, fonts)
 
     # Bottom info bar
-    info_y = MARGIN + BOARD_PX
+    info_y = MARGIN + BOARD_PX + INFO_GAP
     pygame.draw.rect(surf, C_INFO_BG, (0, info_y, MARGIN + BOARD_PX, INFO_H))
 
     # Turn indicator disc

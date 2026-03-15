@@ -27,9 +27,9 @@ except ImportError:
 
 CELL = 68
 MARGIN = 30
-TOP_M = 46
+TOP_M = 52
 BOARD_PX = BOARD_N * CELL
-STATUS_H = 56
+STATUS_H = 72
 WIN_W = BOARD_PX + 2 * MARGIN
 WIN_H = BOARD_PX + TOP_M + MARGIN + STATUS_H
 BX = MARGIN
@@ -498,7 +498,7 @@ class Renderer:
             role = "White" if game.my_player == WHITE else "Black"
             accent = C_WHITE_FILL if game.my_player == WHITE else C_BLACK_FILL
             tag = self.hint_font.render(f"You: {role}", True, accent)
-            scr.blit(tag, (WIN_W - tag.get_width() - BX, sy + 26))
+            scr.blit(tag, (WIN_W - tag.get_width() - BX - 40, sy + 26))
         else:
             parts = []
             if game.phase == PH_ARROW:

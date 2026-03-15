@@ -34,7 +34,7 @@ except ImportError:
 
 # ── Display Constants ────────────────────────────────────────────────────────
 
-WINDOW_W, WINDOW_H = 1100, 920
+WINDOW_W, WINDOW_H = 1100, 950
 FPS = 60
 
 CELL_SP   = 70            # pixel distance between adjacent cell centers
@@ -544,11 +544,11 @@ class Renderer:
             name = "BLACK" if game.turn == BLACK else "WHITE"
             col  = C_TURN_BLK if game.turn == BLACK else C_TURN_WHT
             txt  = self.f_big.render(f"{name}'s turn", True, col)
-        self.screen.blit(txt, (WINDOW_W // 2 - txt.get_width() // 2, 14))
+        self.screen.blit(txt, (WINDOW_W // 2 - txt.get_width() // 2, 18))
 
         # Capture scores
-        self._draw_score(game, BLACK, 30, WINDOW_H - 82)
-        self._draw_score(game, WHITE, WINDOW_W - 280, WINDOW_H - 82)
+        self._draw_score(game, BLACK, 30, WINDOW_H - 100)
+        self._draw_score(game, WHITE, WINDOW_W - 330, WINDOW_H - 100)
 
         # Controls / role indicator
         if game.online:
@@ -556,7 +556,7 @@ class Renderer:
             accent = C_TURN_BLK if game.my_player == BLACK else C_TURN_WHT
             tag = self.f_sm.render(f"You: {role}", True, accent)
             self.screen.blit(tag, (WINDOW_W // 2 - tag.get_width() // 2,
-                                   WINDOW_H - 18))
+                                   WINDOW_H - 30))
         else:
             lines = [
                 "LClick: select marble / move \u00b7 RClick: deselect",
@@ -565,7 +565,7 @@ class Renderer:
             for i, line in enumerate(lines):
                 s = self.f_sm.render(line, True, C_DIM)
                 self.screen.blit(s, (WINDOW_W // 2 - s.get_width() // 2,
-                                     WINDOW_H - 34 + i * 16))
+                                     WINDOW_H - 46 + i * 16))
 
         # Flash message
         if game.msg_timer > 0 and game.msg:

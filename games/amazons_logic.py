@@ -10,6 +10,8 @@ A move is represented as three [row, col] pairs::
 """
 
 import copy
+import math
+from collections import deque
 
 try:
     from games.base_game import AbstractBoardGame
@@ -181,6 +183,87 @@ class AmazonsLogic(AbstractBoardGame):
         # Current player cannot move — opponent wins
         winner = BLACK if turn == WHITE else WHITE
         return {"is_over": True, "winner": winner, "is_draw": False}
+
+    # ── Evaluation hook ────────────────────────────────────────────────
+
+    def evaluate_position(self, state, player):
+        """Evaluate from *player*'s perspective using king-distance territory."""
+        board = state["board"]
+        opp = BLACK if player == WHITE else WHITE
+
+        # Multi-source BFS for king-distance from each side's amazons
+        INF = 200
+        dist_p = [[INF] * BOARD_N for _ in range(BOARD_N)]
+        dist_o = [[INF] * BOARD_N for _ in range(BOARD_N)]
+        q_p = deque()
+        q_o = deque()
+
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                v = board[r][c]
+                if v == player:
+                    dist_p[r][c] = 0
+                    q_p.append((r, c))
+                elif v == opp:
+                    dist_o[r][c] = 0
+                    q_o.append((r, c))
+
+        # BFS for player
+        while q_p:
+            r, c = q_p.popleft()
+            d = dist_p[r][c] + 1
+            for dr, dc in _DIRS:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < BOARD_N and 0 <= nc < BOARD_N:
+                    if board[nr][nc] == EMPTY and dist_p[nr][nc] > d:
+                        dist_p[nr][nc] = d
+                        q_p.append((nr, nc))
+
+        # BFS for opponent
+        while q_o:
+            r, c = q_o.popleft()
+            d = dist_o[r][c] + 1
+            for dr, dc in _DIRS:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < BOARD_N and 0 <= nc < BOARD_N:
+                    if board[nr][nc] == EMPTY and dist_o[nr][nc] > d:
+                        dist_o[nr][nc] = d
+                        q_o.append((nr, nc))
+
+        # Count territories
+        own_terr = 0
+        opp_terr = 0
+        own_reach = 0
+        opp_reach = 0
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                if board[r][c] != EMPTY:
+                    continue
+                dp = dist_p[r][c]
+                do = dist_o[r][c]
+                if dp < do:
+                    own_terr += 1
+                elif do < dp:
+                    opp_terr += 1
+                if dp < INF:
+                    own_reach += 1
+                if do < INF:
+                    opp_reach += 1
+
+        # Near-terminal
+        if own_reach == 0:
+            return 0.0
+        if opp_reach == 0:
+            return 1.0
+
+        # Territory differential (dominant)
+        score = (own_terr - opp_terr) * 100
+
+        # Reachable squares (secondary mobility proxy)
+        score += (own_reach - opp_reach) * 10
+
+        x = max(-20.0, min(20.0, score / 500.0))
+        return 1.0 / (1.0 + math.exp(-x))
 
     # ── Efficient override ───────────────────────────────────────────────
 

@@ -25,6 +25,7 @@ Player 1 = BLACK, Player 2 = WHITE.
 """
 
 import copy
+import math
 
 try:
     from games.base_game import AbstractBoardGame
@@ -427,6 +428,95 @@ class ShobuLogic(AbstractBoardGame):
             return {"is_over": True, "winner": winner, "is_draw": False}
 
         return {"is_over": False, "winner": None, "is_draw": False}
+
+    # ── Evaluation hook ────────────────────────────────────────────────
+
+    def evaluate_position(self, state, player):
+        """Evaluate from *player*'s perspective using per-board stone analysis."""
+        boards = state["boards"]
+        opp = WHITE if player == BLACK else BLACK
+
+        # Per-board stone counts and positional features
+        own_stones = [0, 0, 0, 0]
+        opp_stones = [0, 0, 0, 0]
+        own_edge = 0
+        opp_edge = 0
+        own_center = 0
+        opp_center = 0
+
+        for b in range(4):
+            for r in range(4):
+                for c in range(4):
+                    v = boards[b][r][c]
+                    if v == player:
+                        own_stones[b] += 1
+                        if r == 0 or r == 3 or c == 0 or c == 3:
+                            own_edge += 1
+                        if 1 <= r <= 2 and 1 <= c <= 2:
+                            own_center += 1
+                    elif v == opp:
+                        opp_stones[b] += 1
+                        if r == 0 or r == 3 or c == 0 or c == 3:
+                            opp_edge += 1
+                        if 1 <= r <= 2 and 1 <= c <= 2:
+                            opp_center += 1
+
+        min_own = min(own_stones)
+        min_opp = min(opp_stones)
+
+        if min_opp == 0:
+            return 1.0
+        if min_own == 0:
+            return 0.0
+
+        # Dominant: min opponent stones per board
+        score = 5000 * (4 - min_opp)
+
+        # Own critical board defense
+        score -= 4000 * (4 - min_own)
+
+        # Edge vulnerability (differential)
+        score += (opp_edge - own_edge) * 300
+
+        # Center control (differential)
+        score += (own_center - opp_center) * 100
+
+        # Tactical flexibility: count direction+distance vectors with
+        # both a valid passive AND aggressive move
+        for side, sign in ((player, 1), (opp, -1)):
+            home = HOME[side]
+            # passive availability per board type, aggr availability per board type
+            p_avail = [[False] * 16, [False] * 16]  # [dark, light]
+            a_avail = [[False] * 16, [False] * 16]
+            for b in range(4):
+                bt = BOARD_TYPE[b]
+                is_home = b in home
+                for r in range(4):
+                    for c in range(4):
+                        if boards[b][r][c] != side:
+                            continue
+                        for di in range(8):
+                            d = DIRS[di]
+                            for dx, dist in enumerate((1, 2)):
+                                vi = di * 2 + dx
+                                if is_home and not p_avail[bt][vi]:
+                                    tr = r + d[0] * dist
+                                    tc = c + d[1] * dist
+                                    if on_grid(tr, tc) and \
+                                       _path_clear_passive(boards, b, r, c, d, dist):
+                                        p_avail[bt][vi] = True
+                                if not a_avail[bt][vi]:
+                                    if _aggr_legal(boards, side, b, r, c, d, dist):
+                                        a_avail[bt][vi] = True
+            flex = 0
+            for vi in range(16):
+                if (p_avail[DARK_T][vi] and a_avail[LITE_T][vi]) or \
+                   (p_avail[LITE_T][vi] and a_avail[DARK_T][vi]):
+                    flex += 1
+            score += sign * flex * 200
+
+        x = max(-20.0, min(20.0, score / 3000.0))
+        return 1.0 / (1.0 + math.exp(-x))
 
     # ── Efficient override ───────────────────────────────────────────────
 

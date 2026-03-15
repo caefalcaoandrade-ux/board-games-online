@@ -729,7 +729,7 @@ def _launch_local_game(game_name):
         pygame.init()
 
 
-# ── Screen: API Key Input (for Expert / Claude AI bot) ───────────────────
+# ── Screen: API Key Input (for Claude AI bot) ────────────────────────────
 
 
 def _run_api_key_screen(screen, fonts):
@@ -781,7 +781,7 @@ def _run_api_key_screen(screen, fonts):
 
         # Instructions
         lines = [
-            "Expert mode uses Claude AI for stronger play.",
+            "Claude mode uses Claude AI for stronger play.",
             "You need an Anthropic API key.",
             "1. Go to console.anthropic.com",
             "2. Create an account and generate an API key",
@@ -863,12 +863,16 @@ def _run_bot_setup(screen, fonts):
     selected_game = None
     selected_diff = "strong"
     scroll = 0
-    diffs = ["weak", "strong", "expert"]
-    diff_labels = {"weak": "Weak", "strong": "Strong", "expert": "Expert"}
+    diffs = ["weak", "average", "strong", "claude"]
+    diff_labels = {
+        "weak": "Weak", "average": "Average",
+        "strong": "Strong", "claude": "Claude",
+    }
     diff_colors = {
-        "weak":   (90, 180, 90),
-        "strong": (200, 70, 70),
-        "expert": (228, 192, 56),
+        "weak":    (90, 180, 90),
+        "average": (220, 160, 50),
+        "strong":  (200, 70, 70),
+        "claude":  (228, 192, 56),
     }
 
     _ITEM_BG  = (52, 48, 58)
@@ -965,9 +969,10 @@ def _run_bot_setup(screen, fonts):
 
         ry += 6
         desc = {
-            "weak": "Random play (instant)",
-            "strong": "Strongest play (8 s)",
-            "expert": "Claude AI (requires API key)",
+            "weak": "Plays badly on purpose (3 s)",
+            "average": "Inconsistent, mid-level (7 s)",
+            "strong": "Strongest play (12 s)",
+            "claude": "Claude AI (requires API key)",
         }
         dt = f_small.render(desc[selected_diff], True, _TXT_DIM)
         screen.blit(dt, (rx, ry))
@@ -1190,8 +1195,8 @@ def main():
                     continue  # back to menu
                 game_name, difficulty = result
 
-                # Expert requires API key
-                if difficulty == "expert":
+                # Claude requires API key
+                if difficulty == "claude":
                     from client.claude_bot import needs_api_key
                     if needs_api_key():
                         key_result = _run_api_key_screen(screen, fonts)

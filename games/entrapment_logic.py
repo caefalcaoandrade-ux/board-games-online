@@ -28,6 +28,7 @@ of the move dicts above.
 """
 
 import copy
+import math
 
 try:
     from games.base_game import AbstractBoardGame
@@ -808,6 +809,127 @@ class EntrapmentLogic(AbstractBoardGame):
             winner = state["winner"]
             return {"is_over": True, "winner": winner, "is_draw": False}
         return {"is_over": False, "winner": None, "is_draw": False}
+
+    # ── Evaluation hook ────────────────────────────────────────────────
+
+    def evaluate_position(self, state, player):
+        """Evaluate from *player*'s perspective using roamer count, mobility, enclosure."""
+        if state["phase"] != "play":
+            return None  # setup/over — decline
+
+        opp = 3 - player
+        board = state["board"]
+
+        own_roamers = state["roamers"][str(player)]
+        opp_roamers = state["roamers"][str(opp)]
+        n_own = len(own_roamers)
+        n_opp = len(opp_roamers)
+
+        # Terminal: 3 captures wins
+        own_caps = state["captures"][str(player)]
+        opp_caps = state["captures"][str(opp)]
+        if own_caps >= 3:
+            return 1.0
+        if opp_caps >= 3:
+            return 0.0
+
+        # Roamer count differential (dominant)
+        score = (n_own - n_opp) * 10000
+
+        # Mobility: count adjacent empty squares for each roamer (no barriers)
+        own_mob_total = 0
+        own_mob_min = 100
+        for pos in own_roamers:
+            r, c = pos[0], pos[1]
+            mob = 0
+            for d in DIRS:
+                nr, nc = r + d[0], c + d[1]
+                if not _in_bounds(nr, nc):
+                    continue
+                if _get_barrier(state, r, c, nr, nc) is not None:
+                    continue
+                if board[nr][nc] is not None:
+                    continue
+                mob += 1
+            own_mob_total += mob
+            if mob < own_mob_min:
+                own_mob_min = mob
+
+        opp_mob_total = 0
+        opp_mob_min = 100
+        for pos in opp_roamers:
+            r, c = pos[0], pos[1]
+            mob = 0
+            for d in DIRS:
+                nr, nc = r + d[0], c + d[1]
+                if not _in_bounds(nr, nc):
+                    continue
+                if _get_barrier(state, r, c, nr, nc) is not None:
+                    continue
+                if board[nr][nc] is not None:
+                    continue
+                mob += 1
+            opp_mob_total += mob
+            if mob < opp_mob_min:
+                opp_mob_min = mob
+
+        # Minimum own roamer mobility (higher = safer)
+        score += own_mob_min * 500
+        score -= opp_mob_min * 500
+
+        # Enclosure progress: per opponent roamer, count blocked sides (0-4)
+        opp_enclosure = 0
+        for pos in opp_roamers:
+            r, c = pos[0], pos[1]
+            blocked = 0
+            for d in DIRS:
+                nr, nc = r + d[0], c + d[1]
+                if not _in_bounds(nr, nc):
+                    blocked += 1
+                elif _get_barrier(state, r, c, nr, nc) is not None:
+                    blocked += 1
+                elif board[nr][nc] is not None:
+                    blocked += 1
+            opp_enclosure += blocked
+
+        own_enclosure = 0
+        for pos in own_roamers:
+            r, c = pos[0], pos[1]
+            blocked = 0
+            for d in DIRS:
+                nr, nc = r + d[0], c + d[1]
+                if not _in_bounds(nr, nc):
+                    blocked += 1
+                elif _get_barrier(state, r, c, nr, nc) is not None:
+                    blocked += 1
+                elif board[nr][nc] is not None:
+                    blocked += 1
+            own_enclosure += blocked
+
+        score += opp_enclosure * 300 - own_enclosure * 300
+
+        # Total mobility differential
+        score += (own_mob_total - opp_mob_total) * 100
+
+        # Barrier economy
+        own_supply = state["supply"][str(player)]
+        opp_supply = state["supply"][str(opp)]
+        score += (own_supply - opp_supply) * 20
+
+        # Positional bonus: central roamers are harder to trap
+        for pos in own_roamers:
+            r, c = pos[0], pos[1]
+            # Distance from center (3,3)
+            dist = abs(r - 3) + abs(c - 3)
+            score += (6 - dist) * 10  # center=60, corner=0
+        for pos in opp_roamers:
+            r, c = pos[0], pos[1]
+            dist = abs(r - 3) + abs(c - 3)
+            score -= (6 - dist) * 10
+
+        # Sigmoid normalization
+        x = max(-20.0, min(20.0, score / 5000.0))
+        return 1.0 / (1.0 + math.exp(-x))
 
     # ── Efficient override ───────────────────────────────────────────────
 

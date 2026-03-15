@@ -14,6 +14,7 @@ Moves are dicts with an ``"action"`` key:
 """
 
 import copy
+import math
 from collections import deque
 
 try:
@@ -475,6 +476,100 @@ class HiveLogic(AbstractBoardGame):
         elif surrounded[2]:
             return 1          # Black queen surrounded -> White wins
         return None
+
+    # ==================================================================
+    # Evaluation hook
+    # ==================================================================
+
+    def evaluate_position(self, state, player):
+        """Evaluate from *player*'s perspective using queen surround features."""
+        board = state["board"]
+        opp = 2 if player == 1 else 1
+        p_key = str(player)
+
+        # Find queen positions
+        queen_pos = {1: None, 2: None}
+        for key, stack in board.items():
+            for piece in stack:
+                if piece["type"] == "queen":
+                    queen_pos[piece["owner"]] = _parse_key(key)
+
+        # Count occupied neighbors of each queen (surround 0-6)
+        own_surround = 0
+        opp_surround = 0
+        if queen_pos[player] is not None:
+            q, r = queen_pos[player]
+            for d in DIRECTIONS:
+                nk = _key(q + d[0], r + d[1])
+                if nk in board and board[nk]:
+                    own_surround += 1
+        if queen_pos[opp] is not None:
+            q, r = queen_pos[opp]
+            for d in DIRECTIONS:
+                nk = _key(q + d[0], r + d[1])
+                if nk in board and board[nk]:
+                    opp_surround += 1
+
+        # Terminal
+        if opp_surround == 6 and own_surround == 6:
+            return 0.5
+        if opp_surround == 6:
+            return 1.0
+        if own_surround == 6:
+            return 0.0
+
+        # Queen surround differential (dominant)
+        score = (opp_surround - own_surround) * 2000
+
+        # Kill spot: at 5/6 surround, own piece adjacent to the gap
+        if opp_surround == 5 and queen_pos[opp] is not None:
+            q, r = queen_pos[opp]
+            for d in DIRECTIONS:
+                nq, nr = q + d[0], r + d[1]
+                nk = _key(nq, nr)
+                if nk not in board or not board[nk]:
+                    # Found the open spot — any own piece adjacent?
+                    for d2 in DIRECTIONS:
+                        mk = _key(nq + d2[0], nr + d2[1])
+                        if mk in board and board[mk]:
+                            top = board[mk][-1]
+                            if top["owner"] == player:
+                                score += 500
+                                break
+                    break
+
+        # Mobility proxy + beetle coverage
+        own_pieces = 0
+        opp_pieces = 0
+        beetle_bonus = 0
+        for key, stack in board.items():
+            if not stack:
+                continue
+            for piece in stack:
+                if piece["owner"] == player:
+                    own_pieces += 1
+                else:
+                    opp_pieces += 1
+            # Own beetle/mosquito on top of a stack, adjacent to opp queen
+            top = stack[-1]
+            if (top["owner"] == player and len(stack) > 1
+                    and top["type"] in ("beetle", "mosquito")
+                    and queen_pos[opp] is not None):
+                kq, kr = _parse_key(key)
+                oq, oqr = queen_pos[opp]
+                if _are_adjacent(kq, kr, oq, oqr):
+                    beetle_bonus += 300
+
+        score += (own_pieces - opp_pieces) * 100
+        score += beetle_bonus
+
+        # Queen placement timing penalty
+        p_turns = state["player_turns"][p_key]
+        if queen_pos[player] is None and p_turns >= 3:
+            score -= 200
+
+        x = max(-20.0, min(20.0, score / 3000.0))
+        return 1.0 / (1.0 + math.exp(-x))
 
     # ==================================================================
     # Resting / pillbug-stun helpers

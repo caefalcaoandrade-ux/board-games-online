@@ -31,7 +31,7 @@ except ImportError:
 # ── Display Constants ────────────────────────────────────────────────────────
 
 WIN_W = 1200
-WIN_H = 780
+WIN_H = 820
 
 WOOD_MED = (180, 120, 60)
 WOOD_BORDER = (100, 65, 25)
@@ -378,7 +378,7 @@ class Renderer:
         self.screen = screen
         self.flipped = False
 
-        self.BX, self.BY = 60, 150
+        self.BX, self.BY = 60, 170
         self.BW, self.BH = 920, 460
         self.PR = 42
         self.SX = self.BW // 8
@@ -473,10 +473,10 @@ class Renderer:
         bot_name = "SOUTH" if bot_player == PLAYER_SOUTH else "NORTH"
         nl = self.font_sm.render(top_name, True, WOOD_LIGHT)
         scr.blit(nl, (self.BX + self.BW // 2 - nl.get_width() // 2,
-                       self.BY - nl.get_height() - 5))
+                       self.BY - nl.get_height() - 22))
         sl = self.font_sm.render(bot_name, True, WOOD_LIGHT)
         scr.blit(sl, (self.BX + self.BW // 2 - sl.get_width() // 2,
-                       self.BY + self.BH + 5))
+                       self.BY + self.BH + 20))
 
         clickable = game.clickable_pits() if not game.game_over else set()
 

@@ -14,9 +14,9 @@ Usage::
     move = bot.choose_move(logic, state, my_player)
 
 Difficulty levels:
-    weak   — pure random (instant), no search at all
-    strong — 8 s, GRAVE selection, mobility eval at cutoff,
-             MCTS-Solver, 3-ply loss prevention, tree reuse
+    weak    — 3 s MCTS, selects the WORST move (lowest visit count)
+    average — 7 s full MCTS, mixed selection (40% best, 30% mid, 30% worst)
+    strong  — 12 s full MCTS, selects the BEST move (highest visit count)
 """
 
 import math
@@ -104,65 +104,73 @@ def _find_amaf_ancestor(node):
 
 
 class MCTSBot:
-    """Game-agnostic MCTS bot with two difficulty levels.
+    """Game-agnostic MCTS bot with three difficulty levels.
 
-    =========  ====  =======  ========  ==========  =========  ====
-    Level      C     Loss     Playout   Evaluation  Solver     Time
-                     check    policy    at cutoff
-    =========  ====  =======  ========  ==========  =========  ====
-    weak       —     off      —         —           off        0 s
-    strong     0.2   3-ply    random    mobility    on         8 s
-    =========  ====  =======  ========  ==========  =========  ====
+    =========  ==========  ====  =======  ==========  =========  ======
+    Level      Selection   C     Loss     Evaluation  Solver     Time
+                           		 check    at cutoff
+    =========  ==========  ====  =======  ==========  =========  ======
+    weak       worst       1.4   off      off         off         3 s
+    average    mixed       0.2   3-ply    on          on          7 s
+    strong     best        0.2   3-ply    on          on         12 s
+    =========  ==========  ====  =======  ==========  =========  ======
 
-    Weak is pure random — no MCTS at all.  Strong uses full MCTS with
-    GRAVE selection, mobility evaluation at playout cutoff, MCTS-Solver,
-    3-ply loss prevention, tree reuse, and progressive move ordering.
-    Random playouts (not greedy) maximize iteration throughput; the
-    mobility evaluation at the leaf provides all the strategic signal.
+    *Weak* runs simple MCTS but deliberately picks the **worst** move
+    (lowest visit count among visited children).  It understands the
+    game but actively avoids the best line.
+
+    *Average* uses full MCTS like Strong, then selects: 40% best move,
+    30% random middle-third move, 30% worst move — creating inconsistent
+    play that feels like a mid-level human.
+
+    *Strong* runs full MCTS and picks the best move (highest visit count).
     """
+
+    # Move-selection policies
+    SELECT_BEST = "best"      # highest visit count (strongest play)
+    SELECT_WORST = "worst"    # lowest visit count (deliberately bad)
+    SELECT_MIXED = "mixed"    # 40% best, 30% middle, 30% worst
 
     PRESETS = {
         "weak": {
-            "time": 0, "c": 1.4, "random_only": True,
+            "time": 3.0, "c": 1.4, "select": "worst",
             "use_grave": False, "use_eval": False,
             "use_solver": False, "loss_ply": 0,
         },
+        "average": {
+            "time": 7.0, "c": 0.2, "select": "mixed",
+            "use_grave": True, "use_eval": True,
+            "use_solver": True, "loss_ply": 3,
+        },
         "strong": {
-            "time": 8.0, "c": 0.2, "random_only": False,
+            "time": 12.0, "c": 0.2, "select": "best",
             "use_grave": True, "use_eval": True,
             "use_solver": True, "loss_ply": 3,
         },
     }
 
-    # Legacy aliases
-    PRESETS["easy"] = PRESETS["normal"] = PRESETS["weak"]
-    PRESETS["medium"] = PRESETS["hard"] = PRESETS["strong"]
-
     def __init__(self, difficulty="strong", max_iterations=None):
         p = self.PRESETS.get(difficulty, self.PRESETS["strong"])
         self.time_limit = p["time"]
         self.c = p["c"]
-        self.random_only = p["random_only"]
+        self.select = p["select"]
         self.use_grave = p["use_grave"]
         self.use_eval = p["use_eval"]
         self.use_solver = p["use_solver"]
         self.loss_ply = p["loss_ply"]
         self.max_iterations = max_iterations
         self._reuse_root = None
+        self._has_game_eval = False
 
     # ── Public API ────────────────────────────────────────────────────
 
     def choose_move(self, logic, state, player):
-        """Choose the best move for *player* in *state*."""
+        """Choose a move for *player* in *state*."""
         moves = logic._get_legal_moves(state, player)
         if not moves:
             return None
         if len(moves) == 1:
             return moves[0]
-
-        # ── Weak: pure random ────────────────────────────────────────
-        if self.random_only and not self.max_iterations:
-            return random.choice(moves)
 
         # ── Immediate win ────────────────────────────────────────────
         for m in moves:
@@ -175,6 +183,12 @@ class MCTSBot:
         # ── Loss prevention ──────────────────────────────────────────
         if self.loss_ply >= 1 and len(moves) <= 20:
             moves = self._loss_filter(logic, state, player, moves)
+
+        # ── Probe game-specific evaluation ─────────────────────────
+        if self.use_eval:
+            self._has_game_eval = logic.evaluate_position(state, player) is not None
+        else:
+            self._has_game_eval = False
 
         # ── Tree reuse ───────────────────────────────────────────────
         root = self._try_reuse(state, player, moves)
@@ -200,9 +214,38 @@ class MCTSBot:
             self._reuse_root = None
             return random.choice(moves)
 
-        best = max(root.children, key=lambda n: n.visits)
-        self._reuse_root = best
-        return best.move
+        # ── Move selection (difficulty-dependent) ─────────────────────
+        chosen = self._select_move(root)
+        self._reuse_root = chosen
+        return chosen.move
+
+    def _select_move(self, root):
+        """Pick a child of *root* according to the selection policy."""
+        children = sorted(root.children, key=lambda n: n.visits)
+        visited = [ch for ch in children if ch.visits > 0]
+        if not visited:
+            return random.choice(children)
+
+        if self.select == self.SELECT_WORST:
+            return visited[0]  # lowest visit count
+
+        if self.select == self.SELECT_MIXED:
+            r = random.random()
+            if r < 0.4:
+                return visited[-1]  # best (40%)
+            elif r < 0.7:
+                # middle third (30%)
+                n = len(visited)
+                lo = n // 3
+                hi = 2 * n // 3
+                if lo >= hi:
+                    return visited[n // 2]
+                return random.choice(visited[lo:hi])
+            else:
+                return visited[0]   # worst (30%)
+
+        # SELECT_BEST (default)
+        return visited[-1]
 
     # ── Loss prevention (1-ply and 3-ply) ────────────────────────────
 
@@ -290,7 +333,7 @@ class MCTSBot:
     # ── Progressive move ordering ────────────────────────────────────
 
     def _order_moves(self, logic, state, player, moves):
-        """Order moves by opponent mobility (most restrictive first)."""
+        """Order moves by game evaluation or opponent mobility."""
         if len(moves) <= 3:
             return moves
         sample_size = min(12, len(moves))
@@ -304,13 +347,21 @@ class MCTSBot:
             if st["is_over"]:
                 if st["winner"] == player:
                     return [m] + rest
-                scored.append((m, 9999))
+                scored.append((m, -1.0 if self._has_game_eval else 9999))
                 continue
+            if self._has_game_eval:
+                ev = logic.evaluate_position(ns, player)
+                if ev is not None:
+                    scored.append((m, ev))
+                    continue
             np = logic._get_current_player(ns)
             opp_count = len(logic._get_legal_moves(ns, np))
             scored.append((m, opp_count))
 
-        scored.sort(key=lambda x: x[1])
+        if self._has_game_eval:
+            scored.sort(key=lambda x: -x[1])  # higher eval = better
+        else:
+            scored.sort(key=lambda x: x[1])   # fewer opp moves = better
         ordered = [m for m, _ in scored]
         random.shuffle(rest)
         return ordered + rest
@@ -464,6 +515,21 @@ class MCTSBot:
                         mv = m
                         break
 
+            # Game-specific evaluation for early playout guidance
+            if mv is None and self._has_game_eval and depth < 2 and len(mvs) > 1:
+                k = min(4, len(mvs))
+                sample = random.sample(mvs, k)
+                best_mv = None
+                best_sc = -1.0
+                for sm in sample:
+                    ns = logic._apply_move(state, p, sm)
+                    ev = logic.evaluate_position(ns, p)
+                    if ev is not None and ev > best_sc:
+                        best_sc = ev
+                        best_mv = sm
+                if best_mv is not None:
+                    mv = best_mv
+
             if mv is None:
                 mv = random.choice(mvs)
 
@@ -473,6 +539,12 @@ class MCTSBot:
         # ── Cutoff evaluation ────────────────────────────────────────
         if not self.use_eval:
             return 0.5
+
+        # Game-specific evaluation takes priority over generic mobility
+        if self._has_game_eval:
+            game_eval = logic.evaluate_position(state, bot_player)
+            if game_eval is not None:
+                return game_eval
 
         return self._evaluate(state, logic, bot_player)
 
