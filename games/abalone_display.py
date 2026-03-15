@@ -600,7 +600,7 @@ class Renderer:
                 you_won = game.winner == game.my_player
                 sub_text = "You win!" if you_won else "You lose."
                 sub = self.f_sm.render(
-                    f"{sub_text}  Press Esc to exit", True, C_DIM)
+                    f"{sub_text}  Q / Esc to leave", True, C_DIM)
             else:
                 sub = self.f_sm.render(
                     "Press R to play again", True, C_DIM)

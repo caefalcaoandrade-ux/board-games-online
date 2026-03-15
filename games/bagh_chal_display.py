@@ -480,7 +480,7 @@ class Renderer:
         self.screen.blit(t, (bx, by))
 
         if game.online:
-            sub = self.f_hint.render("Press Q to exit", True, DIM_COL)
+            sub = self.f_hint.render("Q / Esc to leave", True, DIM_COL)
         else:
             sub = self.f_hint.render("R: restart  Q: quit", True, DIM_COL)
         self.screen.blit(sub, (WIN_W // 2 - sub.get_width() // 2,

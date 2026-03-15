@@ -568,7 +568,7 @@ class Renderer:
                 you_won = game.winner == game.my_player
                 sub_text = "You win!" if you_won else "You lose."
                 surf = self.f_med.render(
-                    f"{sub_text}  Press Esc to exit", True, TEXT_DIM)
+                    f"{sub_text}  Q / Esc to leave", True, TEXT_DIM)
                 self.screen.blit(surf, (px, y)); y += 52
                 self.btn_reset = pygame.Rect(0, 0, 0, 0)
             else:

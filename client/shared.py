@@ -139,7 +139,7 @@ def draw_command_panel(surface: pygame.Surface, hist: History,
     fg_dim = (120, 120, 120)
 
     lines: list[tuple[str, tuple]] = []
-    lines.append(("F: Flip  \u2190\u2192: History  Esc: Live  Q: Quit", fg_dim))
+    lines.append(("F: Flip  \u2190\u2192: History  Esc: Back/Quit  Q: Quit", fg_dim))
     if not hist.is_live:
         lines.append((hist.position_str, fg))
     if not is_my_turn and hist.is_live:
@@ -226,6 +226,8 @@ def handle_shared_input(event: pygame.event.Event, hist: History,
             hist.forward()
             return "handled"
         if event.key == pygame.K_ESCAPE:
+            if hist.is_live:
+                return "quit"  # nothing to jump to — treat as leave
             hist.jump_to_live()
             return "handled"
 

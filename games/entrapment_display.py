@@ -897,7 +897,7 @@ class Renderer:
             if game.online:
                 you_won = game.winner == game.my_player
                 sub_text = "You win!" if you_won else "You lose."
-                sub = self.font.render("{}  Press Esc to exit".format(sub_text), True, (200, 200, 200))
+                sub = self.font.render("{}  Q / Esc to leave".format(sub_text), True, (200, 200, 200))
             else:
                 sub = self.font.render("Click  New Game  to play again.", True, (200, 200, 200))
             scr.blit(sub, sub.get_rect(center=(BOARD_X + BOARD_PX // 2, WIN_H // 2 + 18)))

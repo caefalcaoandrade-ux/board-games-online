@@ -642,7 +642,7 @@ class Renderer:
                 you_won = game.winner == game.my_player
                 sub_text = "You win!" if you_won else "You lose."
                 rs = self.f_sm.render(
-                    f"{sub_text}  Press Esc to exit", True, TXT_DIM)
+                    f"{sub_text}  Q / Esc to leave", True, TXT_DIM)
             else:
                 rs = self.f_sm.render("Press R to restart", True, TXT_DIM)
             self.screen.blit(rs, (WIN_W // 2 - rs.get_width() // 2, 44))

@@ -475,7 +475,7 @@ class Renderer:
                 you_won = game.winner == game.my_player
                 sub_text = "You win!" if you_won else "You lose."
                 sub = self.hint_font.render(
-                    f"  {sub_text}  Press Esc to exit", True, C_HINT_TXT)
+                    f"  {sub_text}  Q / Esc to leave", True, C_HINT_TXT)
             else:
                 sub = self.hint_font.render(
                     "  Press R to play again", True, C_HINT_TXT)

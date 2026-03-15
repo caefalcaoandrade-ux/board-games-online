@@ -917,7 +917,7 @@ class Renderer:
                 you_won = g.winner == g.my_player
                 sub_text = "You win!" if you_won else "You lose."
                 sub = self.f_sm.render(
-                    "{}  Press Esc to exit".format(sub_text), True, TXT_MID)
+                    "{}  Q / Esc to leave".format(sub_text), True, TXT_MID)
             else:
                 sub = self.f_sm.render(
                     "Press N to play again", True, TXT_MID)

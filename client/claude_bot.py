@@ -332,7 +332,10 @@ class ClaudeBot:
         key = _load_key()
         if not key:
             return None
-        import anthropic
+        try:
+            import anthropic
+        except ImportError:
+            return None
         self._client = anthropic.Anthropic(api_key=key)
         return self._client
 

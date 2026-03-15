@@ -746,7 +746,7 @@ class Renderer:
             you_won = game.winner == game.my_player
             sub_text = "You win!" if you_won else "You lose."
             sub = self.fhint.render(
-                f"{sub_text}  Press Esc to exit", True, (180, 180, 180))
+                f"{sub_text}  Q / Esc to leave", True, (180, 180, 180))
         else:
             sub = self.fhint.render(
                 "Press R to restart", True, (180, 180, 180))

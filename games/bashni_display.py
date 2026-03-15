@@ -696,7 +696,7 @@ def draw_board(surf, game, fonts, flipped=False):
             else:
                 sub_text = "You lose."
             sub = fonts["hint"].render(
-                f"{sub_text}  Press Esc to exit", True, C_TEXT_DIM)
+                f"{sub_text}  Q / Esc to leave", True, C_TEXT_DIM)
         else:
             sub = fonts["hint"].render("Press R to play again", True, C_TEXT_DIM)
         surf.blit(sub, sub.get_rect(center=(board_area_w // 2,

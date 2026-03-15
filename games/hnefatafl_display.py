@@ -462,7 +462,7 @@ class Renderer:
                 you_won = game.winner == game.my_player
                 sub_text = "You win!" if you_won else "You lose."
                 sub = self.sfont.render(
-                    f"{sub_text}  Press Esc to exit", True, C_LABEL)
+                    f"{sub_text}  Q / Esc to leave", True, C_LABEL)
             else:
                 sub = self.sfont.render("Press R to play again", True, C_LABEL)
             self.screen.blit(sub, sub.get_rect(center=(WIN_W // 2,
