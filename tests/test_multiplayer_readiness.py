@@ -166,7 +166,7 @@ def ensure_server():
     server = uvicorn.Server(config)
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
-    time.sleep(0.5)
+    time.sleep(0.3)
     _server_started = True
 
 
@@ -186,14 +186,14 @@ def setup_room(game_name):
     from client.network import NetworkClient
     c1 = NetworkClient(WS_URL)
     c1.connect()
-    time.sleep(0.3)
+    time.sleep(0.1)
     c1.create_room(game_name)
     poll_until(c1, "room_created")
     code = c1.room_code
 
     c2 = NetworkClient(WS_URL)
     c2.connect()
-    time.sleep(0.3)
+    time.sleep(0.1)
     c2.join_room(code)
 
     msgs1 = poll_until(c1, "game_started")
@@ -233,12 +233,12 @@ def test_server_havannah_lifecycle():
 
         # Wrong-turn move by the same player (now it's the other's turn)
         active.send_move(legal[0])
-        time.sleep(0.3)
+        time.sleep(0.1)
         errs = [m for m in active.poll_messages() if m.get("type") == "error"]
         assert len(errs) >= 1, "Wrong-turn move should be rejected"
 
         # Passive player should NOT have received an error
-        time.sleep(0.2)
+        time.sleep(0.1)
         passive_errs = [m for m in passive.poll_messages()
                         if m.get("type") == "error"]
         assert len(passive_errs) == 0, "Innocent player got error"
@@ -281,7 +281,7 @@ def test_server_hnefatafl_lifecycle():
         # Illegal move: garbage data
         player = logic.get_current_player(state)
         clients[player].send_move("garbage")
-        time.sleep(0.3)
+        time.sleep(0.1)
         errs = [m for m in clients[player].poll_messages()
                 if m.get("type") == "error"]
         assert len(errs) >= 1, "Illegal move should be rejected"
@@ -343,7 +343,7 @@ def test_server_entrapment_lifecycle():
         legal = logic.get_legal_moves(state, player)
         if legal:
             clients[wrong].send_move(legal[0])
-            time.sleep(0.3)
+            time.sleep(0.1)
             errs = [m for m in clients[wrong].poll_messages()
                     if m.get("type") == "error"]
             assert len(errs) >= 1, "Wrong player move should be rejected"
@@ -356,50 +356,53 @@ def test_server_entrapment_lifecycle():
 # ── Game-over propagation through server ──────────────────────────────────
 
 def test_server_game_over_propagation():
-    """Play a game to completion through the server, both players get game_over."""
+    """Inject near-terminal state, play final move, both players get game_over."""
     ensure_server()
     from server.main import rooms
 
-    # Use Havannah — relatively fast to reach game-over with random play
+    # Find a state one move from game-over offline (fast)
+    rng = random.Random(42)
+    logic = create_game("Havannah")
+    pre_state, winning_player, winning_move = None, None, None
+    state = logic.create_initial_state()
+    for _ in range(2000):
+        status = logic.get_game_status(state)
+        if status["is_over"]:
+            break
+        player = logic.get_current_player(state)
+        legal = logic.get_legal_moves(state, player)
+        if not legal:
+            break
+        prev_state = copy.deepcopy(state)
+        prev_player = player
+        move = rng.choice(legal)
+        state = logic.apply_move(state, player, move)
+        post = logic.get_game_status(state)
+        if post["is_over"]:
+            pre_state, winning_player, winning_move = prev_state, prev_player, move
+            break
+
+    assert pre_state is not None, "Could not find Havannah game-over sequence"
+
     c1, c2, gs1, gs2, code = setup_room("Havannah")
     try:
-        logic = create_game("Havannah")
-        state = gs1["state"]
-        clients = {1: c1, 2: c2}
-        rng = random.Random(77)
+        # Inject the pre-final state into the server room
+        room = rooms.get(code)
+        assert room is not None
+        room.state = copy.deepcopy(pre_state)
 
-        game_over_msgs = {1: None, 2: None}
+        active = c1 if winning_player == 1 else c2
+        passive = c2 if winning_player == 1 else c1
+        active.send_move(winning_move)
 
-        for _ in range(200):
-            status = logic.get_game_status(state)
-            if status["is_over"]:
-                break
-            player = logic.get_current_player(state)
-            legal = logic.get_legal_moves(state, player)
-            if not legal:
-                break
-            move = rng.choice(legal)
-            clients[player].send_move(move)
+        r1 = poll_until(c1, "game_over", timeout=5)
+        r2 = poll_until(c2, "game_over", timeout=5)
 
-            # Poll both for move_made or game_over
-            r1 = poll_until(c1, "move_made", timeout=3)
-            r2 = poll_until(c2, "move_made", timeout=3)
-
-            go1 = [m for m in r1 if m["type"] == "game_over"]
-            go2 = [m for m in r2 if m["type"] == "game_over"]
-            if go1:
-                game_over_msgs[1] = go1[0]
-                game_over_msgs[2] = go2[0] if go2 else None
-                break
-
-            mm = [m for m in r1 if m["type"] == "move_made"]
-            if mm:
-                state = mm[0]["state"]
-
-        if game_over_msgs[1]:
-            assert game_over_msgs[2] is not None, \
-                "Both players should receive game_over"
-            assert game_over_msgs[1]["winner"] == game_over_msgs[2]["winner"]
+        go1 = [m for m in r1 if m["type"] == "game_over"]
+        go2 = [m for m in r2 if m["type"] == "game_over"]
+        assert len(go1) >= 1, "P1 should receive game_over"
+        assert len(go2) >= 1, "P2 should receive game_over"
+        assert go1[0]["winner"] == go2[0]["winner"]
     finally:
         c1.disconnect()
         c2.disconnect()

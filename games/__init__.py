@@ -14,6 +14,7 @@ from games.havannah_logic import HavannahLogic
 from games.hive_logic import HiveLogic
 from games.hnefatafl_logic import HnefataflLogic
 from games.shobu_logic import ShobuLogic
+from games.tak_logic import TakLogic
 from games.tumbleweed_logic import TumbleweedLogic
 from games.yinsh_logic import YinshLogic
 
@@ -34,6 +35,7 @@ GAME_REGISTRY: dict[str, type] = {
     "Hive": HiveLogic,
     "Hnefatafl": HnefataflLogic,
     "Shobu": ShobuLogic,
+    "Tak": TakLogic,
     "Tumbleweed": TumbleweedLogic,
     "YINSH": YinshLogic,
 }

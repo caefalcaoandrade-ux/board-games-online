@@ -53,6 +53,7 @@ a = Analysis(
         'games.havannah_logic',
         'games.hnefatafl_logic',
         'games.shobu_logic',
+        'games.tak_logic',
         'games.tumbleweed_logic',
         'games.yinsh_logic',
 
@@ -67,6 +68,7 @@ a = Analysis(
         'games.havannah_display',
         'games.hnefatafl_display',
         'games.shobu_display',
+        'games.tak_display',
         'games.tumbleweed_display',
         'games.yinsh_display',
 

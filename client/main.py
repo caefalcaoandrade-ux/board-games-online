@@ -863,14 +863,13 @@ def _run_bot_setup(screen, fonts):
     selected_game = None
     selected_diff = "strong"
     scroll = 0
-    diffs = ["weak", "average", "strong", "claude"]
+    diffs = ["weak", "strong", "claude"]
     diff_labels = {
-        "weak": "Weak", "average": "Average",
+        "weak": "Weak",
         "strong": "Strong", "claude": "Claude",
     }
     diff_colors = {
         "weak":    (90, 180, 90),
-        "average": (220, 160, 50),
         "strong":  (200, 70, 70),
         "claude":  (228, 192, 56),
     }
@@ -970,7 +969,6 @@ def _run_bot_setup(screen, fonts):
         ry += 6
         desc = {
             "weak": "Plays badly on purpose (3 s)",
-            "average": "Inconsistent, mid-level (7 s)",
             "strong": "Strongest play (12 s)",
             "claude": "Claude AI (requires API key)",
         }

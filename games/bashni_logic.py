@@ -546,97 +546,305 @@ class BashniLogic(AbstractBoardGame):
     # ── Evaluation hook ─────────────────────────────────────────────────
 
     def evaluate_position(self, state, player):
-        """Evaluate from *player*'s perspective using stack features."""
+        """Evaluate from *player*'s perspective using Bashni stack heuristics.
+
+        Features: material (commander types + cap-safety-adjusted imprisonment),
+        stack composition (cap depth, negative potential, resilience, hostile
+        payload), mobility proxy, positional (back rank, center, edge shelter,
+        safe storage, promotion distance), phase-dependent weighting, danger
+        signals.
+        """
         board = state["board"]
         color = PLAYER_TO_COLOR[player]
         opp_c = opponent_color(color)
+        p_promo = promo_row(color)
+        o_promo = promo_row(opp_c)
+        p_home = 0 if color == W else BOARD_N - 1
+        o_home = BOARD_N - 1 if color == W else 0
 
-        own_stacks = 0
-        opp_stacks = 0
-        own_kings = 0
-        opp_kings = 0
-        own_prisoners = 0    # own pieces buried under opponent stacks
-        opp_prisoners = 0    # opponent pieces buried under own stacks
-        own_comp = 0
-        opp_comp = 0
-        own_center = 0
-        opp_center = 0
-        own_adv = 0.0
-        opp_adv = 0.0
-        lib_penalty = 0
+        # ── Accumulators (p = player, o = opponent) ──────────────────
+        p_men = p_kings = 0
+        o_men = o_kings = 0
+        p_imp_val = o_imp_val = 0.0
+        p_cap_sum = o_cap_sum = 0
+        p_neg_pot = o_neg_pot = 0
+        p_res = o_res = 0.0
+        p_move = o_move = 0
+        p_back = o_back = 0
+        p_center = o_center = 0
+        p_pdist = o_pdist = 0
+        p_over = o_over = 0
+        p_hostile_v = o_hostile_v = 0
+        p_edge = o_edge = 0
+        p_safe = o_safe = 0
+        p_thin = o_thin = 0
+        own_deep = 0
+        opp_deep = 0
+        total_stacks = 0
 
         for r in range(BOARD_N):
             for c in range(BOARD_N):
                 col = board[r][c]
                 if col is None:
                     continue
-                top = col[-1]
-                tc = top[0]
-                is_center = 3 <= r <= 6 and 3 <= c <= 6
 
-                if tc == color:
-                    own_stacks += 1
-                    if top[1] == KING:
-                        own_kings += 1
-                    if is_center:
-                        own_center += 1
-                    # Advancement toward promotion row
-                    if color == W:
-                        own_adv += 20 + 60.0 * r / 9.0
+                total_stacks += 1
+                h = len(col)
+                cmd_c = col[-1][0]
+                cmd_rank = col[-1][1]
+                is_p = (cmd_c == color)
+
+                # Cap depth: consecutive commander-color pieces from top
+                cap = 0
+                for i in range(h - 1, -1, -1):
+                    if col[i][0] == cmd_c:
+                        cap += 1
                     else:
-                        own_adv += 20 + 60.0 * (9 - r) / 9.0
-                    # Composition depth: consecutive friendly from top
-                    depth = 0
-                    for i in range(len(col) - 1, -1, -1):
-                        if col[i][0] == color:
-                            depth += 1
+                        break
+
+                prisoners = h - cap
+
+                # Imprisoned piece types and value with cap safety
+                imp_men = imp_kings = 0
+                for i in range(h - cap):
+                    if col[i][0] != cmd_c:
+                        if col[i][1] == MAN:
+                            imp_men += 1
                         else:
-                            break
-                    own_comp += depth
-                    # Prisoners: opponent pieces in own stack
-                    for p in col:
-                        if p[0] == opp_c:
-                            opp_prisoners += 1
-                    # Liberation threat: only 1 friendly on top, >=2 enemies below
-                    if depth == 1 and len(col) >= 3:
-                        enemies = sum(1 for p in col[:-1] if p[0] == opp_c)
-                        if enemies >= 2:
-                            lib_penalty += enemies * 100
+                            imp_kings += 1
+
+                raw_imp = imp_men * 50 + imp_kings * 80
+                if prisoners > 0 and cap >= 1:
+                    safety = min(1.0, cap / (prisoners * 0.5))
+                    imp_v = raw_imp * safety
                 else:
-                    opp_stacks += 1
-                    if top[1] == KING:
-                        opp_kings += 1
-                    if is_center:
-                        opp_center += 1
-                    if opp_c == W:
-                        opp_adv += 20 + 60.0 * r / 9.0
-                    else:
-                        opp_adv += 20 + 60.0 * (9 - r) / 9.0
-                    depth = 0
-                    for i in range(len(col) - 1, -1, -1):
-                        if col[i][0] == opp_c:
-                            depth += 1
-                        else:
-                            break
-                    opp_comp += depth
-                    for p in col:
-                        if p[0] == color:
-                            own_prisoners += 1
+                    imp_v = float(raw_imp)
 
-        if own_stacks == 0:
+                # Deep prisoners (cap >= 2: all need multiple captures to free)
+                deep = (imp_men + imp_kings) if cap >= 2 else 0
+
+                # Negative potential: prisoners² under thin cap
+                neg_pot = prisoners * prisoners if cap <= 2 and prisoners >= 2 else 0
+
+                # Stack resilience (diminishing returns, capped at 4)
+                res = 0.0
+                for layer in range(2, min(cap, 4) + 1):
+                    res += 8.0 / layer
+
+                # Hostile payload value (enemy piece directly under commander)
+                hostile_v = 0
+                if h >= 2 and col[-2][0] != cmd_c:
+                    hostile_v = 80 if col[-2][1] == KING else 40
+
+                # Mobility proxy: can this stack potentially move?
+                can_move = False
+                if cmd_rank == KING:
+                    for d in DIRS:
+                        nr, nc = r + d[0], c + d[1]
+                        if 0 <= nr < BOARD_N and 0 <= nc < BOARD_N and board[nr][nc] is None:
+                            can_move = True
+                            break
+                else:
+                    fwd = 1 if cmd_c == W else -1
+                    for dc_off in (-1, 1):
+                        nr, nc = r + fwd, c + dc_off
+                        if 0 <= nr < BOARD_N and 0 <= nc < BOARD_N and board[nr][nc] is None:
+                            can_move = True
+                            break
+                    if not can_move:
+                        # Men capture backwards too
+                        for d in DIRS:
+                            er, ec = r + d[0], c + d[1]
+                            lr, lc = r + 2 * d[0], c + 2 * d[1]
+                            if (0 <= er < BOARD_N and 0 <= ec < BOARD_N
+                                    and 0 <= lr < BOARD_N and 0 <= lc < BOARD_N
+                                    and board[er][ec] is not None
+                                    and board[er][ec][-1][0] != cmd_c
+                                    and board[lr][lc] is None):
+                                can_move = True
+                                break
+
+                # Positional features
+                is_center = 3 <= r <= 6 and 3 <= c <= 6
+                is_edge = (c == 0 or c == BOARD_N - 1)
+
+                center_v = 0
+                if is_center:
+                    if cmd_rank == KING:
+                        center_v = 40
+                    elif h > 3:
+                        center_v = -20
+                    else:
+                        center_v = 15
+
+                edge_v = 0
+                if is_edge:
+                    if prisoners >= 2:
+                        edge_v += 25
+                    if cmd_rank == KING:
+                        edge_v -= 15
+
+                # Safe storage: prisoner-heavy stacks in own territory
+                safe_v = 0
+                if prisoners >= 2:
+                    own_half = (r < BOARD_N // 2) if cmd_c == W else (r >= BOARD_N // 2)
+                    safe_v = (8 if own_half else -8) * prisoners
+
+                # Promotion distance and back rank
+                if is_p:
+                    pdist = abs(r - p_promo) if cmd_rank == MAN else 0
+                    is_br = (r == p_home and cmd_rank == MAN)
+                else:
+                    pdist = abs(r - o_promo) if cmd_rank == MAN else 0
+                    is_br = (r == o_home and cmd_rank == MAN)
+
+                # ── Accumulate ──
+                if is_p:
+                    if cmd_rank == KING:
+                        p_kings += 1
+                    else:
+                        p_men += 1
+                    p_imp_val += imp_v
+                    p_cap_sum += cap
+                    p_neg_pot += neg_pot
+                    p_res += res
+                    if can_move:
+                        p_move += 1
+                    p_hostile_v += hostile_v
+                    if is_br:
+                        p_back += 1
+                    p_center += center_v
+                    p_pdist += pdist
+                    p_over += max(0, h - 5) * 5
+                    p_edge += edge_v
+                    p_safe += safe_v
+                    if cap <= 2 and prisoners >= 2:
+                        p_thin += 1
+                    opp_deep += deep
+                else:
+                    if cmd_rank == KING:
+                        o_kings += 1
+                    else:
+                        o_men += 1
+                    o_imp_val += imp_v
+                    o_cap_sum += cap
+                    o_neg_pot += neg_pot
+                    o_res += res
+                    if can_move:
+                        o_move += 1
+                    o_hostile_v += hostile_v
+                    if is_br:
+                        o_back += 1
+                    o_center += center_v
+                    o_pdist += pdist
+                    o_over += max(0, h - 5) * 5
+                    o_edge += edge_v
+                    o_safe += safe_v
+                    if cap <= 2 and prisoners >= 2:
+                        o_thin += 1
+                    own_deep += deep
+
+        # ── Terminal ──────────────────────────────────────────────────
+        p_total = p_men + p_kings
+        o_total = o_men + o_kings
+        if p_total == 0:
             return 0.0
-        if opp_stacks == 0:
+        if o_total == 0:
             return 1.0
 
-        score = (
-            (own_stacks - opp_stacks) * 1000
-            + (own_kings - opp_kings) * 500
-            + (opp_prisoners - own_prisoners) * 200
-            + (own_comp - opp_comp) * 150
-            + (own_center - opp_center) * 30
-            + (own_adv - opp_adv)
-            - lib_penalty
-        )
+        # ── Phase detection ───────────────────────────────────────────
+        total_kings = p_kings + o_kings
+        if total_stacks >= 30:
+            phase = 0
+        elif total_stacks >= 15:
+            phase = 1
+        else:
+            phase = 2
+        if total_kings >= 2 and total_stacks < 12:
+            phase = 2
+
+        # ── Material: commanders weighted by type + imprisonment ──────
+        material = ((p_men * 100 + p_kings * 350)
+                    - (o_men * 100 + o_kings * 350)
+                    + p_imp_val - o_imp_val)
+
+        # ── Composition: cap depth, resilience, neg potential, hostile ─
+        comp = ((p_cap_sum - o_cap_sum) * 30
+                + (p_res - o_res) * 20
+                - (p_neg_pot - o_neg_pot) * 40
+                - (p_hostile_v - o_hostile_v))
+
+        # ── Mobility proxy with non-linear collapse penalty ───────────
+        mob = (p_move - o_move) * 80
+        if p_move <= 2 and o_move >= 5:
+            mob -= (3 - p_move) * 400
+        if o_move <= 2 and p_move >= 5:
+            mob += (3 - o_move) * 400
+
+        # ── Positional ────────────────────────────────────────────────
+        pos = ((p_center - o_center)
+               + (p_edge - o_edge)
+               + (p_safe - o_safe)
+               + (o_pdist - p_pdist) * 5)
+
+        back = (p_back - o_back) * 40
+
+        # ── Danger signals ────────────────────────────────────────────
+        danger = 0.0
+
+        # Mass thin-cap vulnerability
+        if p_thin > 0 and p_total > 0 and p_thin >= p_total * 0.6:
+            danger -= 300
+        if o_thin > 0 and o_total > 0 and o_thin >= o_total * 0.6:
+            danger += 300
+
+        # King advantage beyond material value
+        king_diff = p_kings - o_kings
+        if king_diff != 0:
+            danger += king_diff * 100
+
+        # Overstacking penalty
+        danger -= p_over
+        danger += o_over
+
+        # Back-rank collapse in opening/midgame
+        if phase <= 1:
+            if p_back < 2 and p_total >= 8:
+                danger -= 80
+            if o_back < 2 and o_total >= 8:
+                danger += 80
+
+        # Irreversible deep prisoner deficit
+        deficit = own_deep - opp_deep
+        if deficit > 4:
+            danger -= (deficit - 4) * 50
+        elif deficit < -4:
+            danger += (-deficit - 4) * 50
+
+        # ── Phase-weighted sum ────────────────────────────────────────
+        if phase == 0:
+            score = (material * 1.0
+                     + comp * 0.3
+                     + mob * 1.0
+                     + pos * 1.0
+                     + back * 2.0
+                     + danger)
+        elif phase == 1:
+            score = (material * 1.0
+                     + comp * 2.0
+                     + mob * 1.2
+                     + pos * 1.0
+                     + back * 1.0
+                     + danger)
+        else:
+            score = (material * 2.0
+                     + comp * 1.0
+                     + mob * 3.0
+                     + pos * 0.5
+                     + back * 0.0
+                     + danger * 2.0)
+
+        # ── Sigmoid normalization ─────────────────────────────────────
         x = max(-20.0, min(20.0, score / 2000.0))
         return 1.0 / (1.0 + math.exp(-x))
 

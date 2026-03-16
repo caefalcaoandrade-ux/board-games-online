@@ -138,48 +138,60 @@ def _start_game(client, game_name):
     return ws1, ws2, gs1["state"], code
 
 
-def test_game_over_detection_and_broadcast():
-    """Play a Havannah game to completion and verify game_over is broadcast."""
+def _find_game_over_sequence_havannah():
+    """Find a state one move from game-over in Havannah."""
+    import copy
+    import random as _rng
     from games.havannah_logic import HavannahLogic
+    for seed in range(20):
+        rng = _rng.Random(seed)
+        logic = HavannahLogic()
+        state = logic.create_initial_state()
+        prev_state, prev_player, prev_move = None, None, None
+        for _ in range(2000):
+            status = logic.get_game_status(state)
+            if status["is_over"]:
+                if prev_state is not None:
+                    return prev_state, prev_player, prev_move, status
+                break
+            player = logic.get_current_player(state)
+            legal = logic.get_legal_moves(state, player)
+            if not legal:
+                break
+            prev_state = copy.deepcopy(state)
+            prev_player = player
+            prev_move = rng.choice(legal)
+            state = logic.apply_move(state, player, prev_move)
+    return None, None, None, None
+
+
+def test_game_over_detection_and_broadcast():
+    """Inject near-terminal state, play final move, verify game_over broadcast."""
+    import copy
+
+    pre_state, winning_player, winning_move, expected = \
+        _find_game_over_sequence_havannah()
+    assert pre_state is not None, "Could not find Havannah game-over sequence"
 
     client = TestClient(app)
     ws1, ws2, state, code = _start_game(client, "Havannah")
-    logic = HavannahLogic()
 
     try:
-        game_ended = False
-        for _ in range(500):  # safety limit
-            player = logic.get_current_player(state)
-            moves = logic.get_legal_moves(state, player)
-            if not moves:
-                break
+        # Inject the pre-final state directly into the room
+        room = rooms[code]
+        room.state = copy.deepcopy(pre_state)
 
-            move = moves[0]
-            active = ws1 if player == 1 else ws2
+        active = ws1 if winning_player == 1 else ws2
+        active.send_json({"type": "make_move", "move": winning_move})
+        msg1 = ws1.receive_json()
+        msg2 = ws2.receive_json()
 
-            active.send_json({"type": "make_move", "move": move})
-            msg1 = ws1.receive_json()
-            msg2 = ws2.receive_json()
-
-            assert msg1["type"] == msg2["type"]
-            assert msg1["type"] in ("move_made", "game_over")
-
-            if msg1["type"] == "game_over":
-                game_ended = True
-                # Both players get the same result
-                assert msg1["winner"] == msg2["winner"]
-                assert msg1["is_draw"] == msg2["is_draw"]
-                assert "state" in msg1
-                # Room should be cleaned up
-                assert code not in rooms
-                break
-
-            state = msg1["state"]
-
-        if not game_ended:
-            # Game didn't end in 500 moves — that's OK for this test,
-            # the important thing is no crashes occurred
-            pass
+        assert msg1["type"] == "game_over"
+        assert msg2["type"] == "game_over"
+        assert msg1["winner"] == msg2["winner"]
+        assert msg1["is_draw"] == msg2["is_draw"]
+        assert "state" in msg1
+        assert code not in rooms
     finally:
         try:
             ws1.close()
@@ -193,31 +205,27 @@ def test_game_over_detection_and_broadcast():
 
 def test_room_cleaned_up_after_game_over():
     """After game_over broadcast, the room code is removed from the registry."""
-    from games.havannah_logic import HavannahLogic
+    import copy
+
+    pre_state, winning_player, winning_move, expected = \
+        _find_game_over_sequence_havannah()
+    assert pre_state is not None, "Could not find Havannah game-over sequence"
 
     client = TestClient(app)
     ws1, ws2, state, code = _start_game(client, "Havannah")
-    logic = HavannahLogic()
 
     try:
         assert code in rooms
-        for _ in range(500):
-            player = logic.get_current_player(state)
-            moves = logic.get_legal_moves(state, player)
-            if not moves:
-                break
-            move = moves[0]
-            active = ws1 if player == 1 else ws2
-            active.send_json({"type": "make_move", "move": move})
-            msg = ws1.receive_json()
-            if player == 2:
-                ws2.receive_json()
-            else:
-                ws2.receive_json()
-            if msg["type"] == "game_over":
-                assert code not in rooms, "Room should be removed after game_over"
-                break
-            state = msg["state"]
+        room = rooms[code]
+        room.state = copy.deepcopy(pre_state)
+
+        active = ws1 if winning_player == 1 else ws2
+        active.send_json({"type": "make_move", "move": winning_move})
+        msg1 = ws1.receive_json()
+        ws2.receive_json()
+
+        assert msg1["type"] == "game_over"
+        assert code not in rooms, "Room should be removed after game_over"
     finally:
         try:
             ws1.close()
@@ -412,31 +420,30 @@ def test_two_simultaneous_rooms_different_games():
 
 def test_move_after_game_ended_via_gameplay():
     """After a game ends via actual play, further moves are rejected."""
-    from games.havannah_logic import HavannahLogic
+    import copy
+
+    pre_state, winning_player, winning_move, expected = \
+        _find_game_over_sequence_havannah()
+    assert pre_state is not None, "Could not find Havannah game-over sequence"
 
     client = TestClient(app)
     ws1, ws2, state, code = _start_game(client, "Havannah")
-    logic = HavannahLogic()
 
     try:
-        # Play to completion
-        for _ in range(500):
-            player = logic.get_current_player(state)
-            moves = logic.get_legal_moves(state, player)
-            if not moves:
-                break
-            move = moves[0]
-            active = ws1 if player == 1 else ws2
-            active.send_json({"type": "make_move", "move": move})
-            msg1 = ws1.receive_json()
-            msg2 = ws2.receive_json()
-            if msg1["type"] == "game_over":
-                # Game ended — try another move
-                ws1.send_json({"type": "make_move", "move": move})
-                err = ws1.receive_json()
-                assert err["type"] == "error"
-                break
-            state = msg1["state"]
+        # Inject near-terminal state
+        room = rooms[code]
+        room.state = copy.deepcopy(pre_state)
+
+        active = ws1 if winning_player == 1 else ws2
+        active.send_json({"type": "make_move", "move": winning_move})
+        msg1 = ws1.receive_json()
+        ws2.receive_json()
+        assert msg1["type"] == "game_over"
+
+        # Game ended — try another move, should get error
+        ws1.send_json({"type": "make_move", "move": winning_move})
+        err = ws1.receive_json()
+        assert err["type"] == "error"
     finally:
         try:
             ws1.close()

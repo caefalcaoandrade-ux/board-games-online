@@ -24,6 +24,7 @@ import games.havannah_logic           # noqa: F401
 import games.hive_logic               # noqa: F401
 import games.hnefatafl_logic          # noqa: F401
 import games.shobu_logic              # noqa: F401
+import games.tak_logic                # noqa: F401
 import games.tumbleweed_logic         # noqa: F401
 import games.yinsh_logic              # noqa: F401
 
@@ -39,6 +40,7 @@ import games.havannah_display         # noqa: F401
 import games.hive_display             # noqa: F401
 import games.hnefatafl_display        # noqa: F401
 import games.shobu_display            # noqa: F401
+import games.tak_display              # noqa: F401
 import games.tumbleweed_display       # noqa: F401
 import games.yinsh_display            # noqa: F401
 

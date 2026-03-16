@@ -1884,6 +1884,354 @@ def test_hive_6_directions():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# TAK
+# ═══════════════════════════════════════════════════════════════════════════
+
+from games.tak_logic import (
+    TakLogic, WHITE, BLACK, FLAT, STANDING, CAPSTONE,
+    BOARD_SIZE, CARRY_LIMIT, INITIAL_STONES, INITIAL_CAPSTONES,
+    _has_road, _count_flats,
+)
+
+
+def test_tak_board_6x6():
+    """§2: Board is a 6x6 grid of 36 squares."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    board = state["board"]
+    assert len(board) == 6
+    for row in board:
+        assert len(row) == 6
+
+
+def test_tak_initial_state():
+    """§3, §4.1: Initial state — empty board, 30 stones + 1 capstone each, White starts."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    assert state["turn"] == WHITE
+    assert state["turn_number"] == 1
+    assert state["game_over"] is False
+    assert state["winner"] is None
+    # Board is empty
+    for r in range(6):
+        for c in range(6):
+            assert state["board"][r][c] == []
+    # Reserves
+    for p in ("1", "2"):
+        assert state["reserves"][p]["stones"] == INITIAL_STONES
+        assert state["reserves"][p]["capstones"] == INITIAL_CAPSTONES
+
+
+def test_tak_opening_protocol():
+    """§4.1: First two turns place opponent's flat stone."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+
+    # Turn 1: Player 1 (White) places Player 2's flat at a1 (row=0, col=0)
+    moves = logic.get_legal_moves(state, WHITE)
+    assert len(moves) == 36  # one per empty square
+    assert all(m["action"] == "place" and m["piece"] == "flat" for m in moves)
+
+    move1 = {"action": "place", "row": 0, "col": 0, "piece": "flat"}
+    state = logic.apply_move(state, WHITE, move1)
+    # The placed piece belongs to Player 2 (Black)
+    assert state["board"][0][0][-1] == [BLACK, FLAT]
+    # Player 2's stone reserve decremented
+    assert state["reserves"]["2"]["stones"] == INITIAL_STONES - 1
+    # Player 1's reserve unchanged
+    assert state["reserves"]["1"]["stones"] == INITIAL_STONES
+
+    # Turn 2: Player 2 (Black) places Player 1's flat at f6 (row=5, col=5)
+    move2 = {"action": "place", "row": 5, "col": 5, "piece": "flat"}
+    state = logic.apply_move(state, BLACK, move2)
+    # The placed piece belongs to Player 1 (White)
+    assert state["board"][5][5][-1] == [WHITE, FLAT]
+    assert state["reserves"]["1"]["stones"] == INITIAL_STONES - 1
+
+
+def test_tak_opening_standing_illegal():
+    """§4.1: Standing stones and capstones are illegal during opening."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    moves = logic.get_legal_moves(state, WHITE)
+    # Only flat placement available
+    piece_types = set(m["piece"] for m in moves)
+    assert piece_types == {"flat"}
+    # Standing is not a legal move
+    illegal = {"action": "place", "row": 0, "col": 0, "piece": "standing"}
+    with pytest.raises(ValueError):
+        logic.apply_move(state, WHITE, illegal)
+
+
+def test_tak_normal_placement_types():
+    """§5: After opening, player can place flat, standing, or capstone."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    # Play through opening
+    state = logic.apply_move(state, WHITE,
+                              {"action": "place", "row": 0, "col": 0, "piece": "flat"})
+    state = logic.apply_move(state, BLACK,
+                              {"action": "place", "row": 5, "col": 5, "piece": "flat"})
+    # Turn 3: White can place flat, standing, capstone
+    moves = logic.get_legal_moves(state, WHITE)
+    place_moves = [m for m in moves if m["action"] == "place"]
+    piece_types = set(m["piece"] for m in place_moves)
+    assert piece_types == {"flat", "standing", "capstone"}
+
+
+def test_tak_carry_limit():
+    """§6.2: Carry limit is 6 (equal to board width)."""
+    assert CARRY_LIMIT == BOARD_SIZE == 6
+
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    # Build a tall stack manually: 8 flat stones at (0,0)
+    board = state["board"]
+    for i in range(8):
+        board[0][0].append([WHITE, FLAT])
+    state["turn"] = WHITE
+    state["turn_number"] = 3
+
+    moves = logic.get_legal_moves(state, WHITE)
+    move_actions = [m for m in moves if m["action"] == "move"
+                    and m["row"] == 0 and m["col"] == 0]
+    # Max carry should be 6, not 8
+    max_carry = max(sum(m["drops"]) for m in move_actions)
+    assert max_carry == 6
+
+
+def test_tak_capstone_flatten():
+    """§7: Capstone can flatten a standing stone on the final drop."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    board = state["board"]
+    # Place a capstone at (2,2) owned by White
+    board[2][2].append([WHITE, CAPSTONE])
+    # Place a standing stone at (2,3) owned by Black
+    board[2][3].append([BLACK, STANDING])
+    state["turn"] = WHITE
+    state["turn_number"] = 3
+
+    # Move capstone east onto the standing stone
+    move = {"action": "move", "row": 2, "col": 2, "direction": 2, "drops": [1]}
+    assert logic.is_valid_move(state, WHITE, move)
+    new = logic.apply_move(state, WHITE, move)
+    # Standing stone was flattened
+    stack = new["board"][2][3]
+    assert len(stack) == 2
+    assert stack[0] == [BLACK, FLAT]  # was standing, now flat
+    assert stack[1] == [WHITE, CAPSTONE]  # capstone on top
+
+
+def test_tak_capstone_cannot_flatten_capstone():
+    """§7: A capstone cannot flatten another capstone."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    board = state["board"]
+    board[2][2].append([WHITE, CAPSTONE])
+    board[2][3].append([BLACK, CAPSTONE])
+    state["turn"] = WHITE
+    state["turn_number"] = 3
+
+    move = {"action": "move", "row": 2, "col": 2, "direction": 2, "drops": [1]}
+    assert not logic.is_valid_move(state, WHITE, move)
+
+
+def test_tak_road_win():
+    """§8.1: Road connecting opposite edges wins."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    board = state["board"]
+    # Build a west-east road for White across row 0
+    for c in range(6):
+        board[0][c].append([WHITE, FLAT])
+    assert _has_road(board, WHITE) is True
+    assert _has_road(board, BLACK) is False
+
+
+def test_tak_road_standing_does_not_count():
+    """§8.1, §3.1: Standing stones do not contribute to roads."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    board = state["board"]
+    # Almost a road but one standing stone breaks it
+    for c in range(6):
+        if c == 3:
+            board[0][c].append([WHITE, STANDING])
+        else:
+            board[0][c].append([WHITE, FLAT])
+    assert _has_road(board, WHITE) is False
+
+
+def test_tak_flat_win_and_draw():
+    """§8.3: Flat count determines winner when board fills; equal = draw."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    board = state["board"]
+    # Fill board: 20 white flats, 16 black flats
+    count = 0
+    for r in range(6):
+        for c in range(6):
+            if count < 20:
+                board[r][c].append([WHITE, FLAT])
+            else:
+                board[r][c].append([BLACK, FLAT])
+            count += 1
+    w, b = _count_flats(board)
+    assert w == 20
+    assert b == 16
+
+    # Equal counts → draw
+    board2 = [[[] for _ in range(6)] for _ in range(6)]
+    count = 0
+    for r in range(6):
+        for c in range(6):
+            if count % 2 == 0:
+                board2[r][c].append([WHITE, FLAT])
+            else:
+                board2[r][c].append([BLACK, FLAT])
+            count += 1
+    w2, b2 = _count_flats(board2)
+    assert w2 == b2 == 18
+
+
+def test_tak_double_road_active_wins():
+    """§8.1.3: If both players have a road, the active player wins."""
+    logic = TakLogic()
+    # Test _check_game_end directly with both roads present
+    state = logic.create_initial_state()
+    state["turn_number"] = 5
+    board = state["board"]
+    # White road: row 0 (west-east)
+    for c in range(6):
+        board[0][c] = [[WHITE, FLAT]]
+    # Black road: row 5 (west-east), completely separate
+    for c in range(6):
+        board[5][c] = [[BLACK, FLAT]]
+    # Both have roads
+    assert _has_road(board, WHITE)
+    assert _has_road(board, BLACK)
+    # Active player was White → White should win per §8.1.3
+    logic._check_game_end(state, WHITE)
+    assert state["game_over"] is True
+    assert state["winner"] == WHITE
+
+
+def test_tak_wrong_player_rejected():
+    """Wrong player's move raises ValueError."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    moves = logic.get_legal_moves(state, WHITE)
+    with pytest.raises(ValueError):
+        logic.apply_move(state, BLACK, moves[0])
+
+
+def test_tak_illegal_move_rejected():
+    """Illegal move raises ValueError."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    # Place on occupied square
+    state2 = logic.apply_move(state, WHITE,
+                               {"action": "place", "row": 0, "col": 0, "piece": "flat"})
+    state2 = logic.apply_move(state2, BLACK,
+                               {"action": "place", "row": 1, "col": 1, "piece": "flat"})
+    # Try placing on occupied square
+    with pytest.raises(ValueError):
+        logic.apply_move(state2, WHITE,
+                          {"action": "place", "row": 0, "col": 0, "piece": "flat"})
+
+
+def test_tak_json_roundtrip():
+    """State and moves survive JSON round-trip."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    # Play a move
+    state = logic.apply_move(state, WHITE,
+                              {"action": "place", "row": 2, "col": 3, "piece": "flat"})
+    # JSON round-trip
+    import json
+    state_rt = json.loads(json.dumps(state))
+    assert state_rt == state
+
+    # Moves round-trip
+    moves = logic.get_legal_moves(state, BLACK)
+    moves_rt = json.loads(json.dumps(moves))
+    assert moves_rt == moves
+
+
+def test_tak_state_immutability():
+    """apply_move must not mutate the original state."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    snapshot = json.dumps(state, sort_keys=True)
+    move = {"action": "place", "row": 0, "col": 0, "piece": "flat"}
+    new_state = logic.apply_move(state, WHITE, move)
+    assert json.dumps(state, sort_keys=True) == snapshot
+    # Mutating new_state should not affect original
+    new_state["board"][0][0].append([BLACK, FLAT])
+    assert state["board"][0][0] == []
+
+
+def test_tak_reserve_exhaustion_triggers_end():
+    """§8.2: Either player's reserve being exhausted triggers game end."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    # Exhaust White's reserves
+    state["reserves"]["1"]["stones"] = 0
+    state["reserves"]["1"]["capstones"] = 0
+    state["turn_number"] = 3
+    state["turn"] = WHITE
+    # White has no placement moves, only movement (if any stacks)
+    # Put one white flat on (0,0) so White can exist
+    state["board"][0][0] = [[WHITE, FLAT]]
+    state["board"][1][1] = [[BLACK, FLAT]]
+    # White can only move (1 piece, 4 dirs)
+    moves = logic.get_legal_moves(state, WHITE)
+    assert all(m["action"] == "move" for m in moves)
+    # Make the move
+    move = moves[0]
+    new_state = logic.apply_move(state, WHITE, move)
+    # Game should end because White's reserve is empty
+    assert new_state["game_over"] is True
+
+
+def test_tak_movement_direction_generation():
+    """§6.3: Movement proceeds in exactly one orthogonal direction."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    board = state["board"]
+    # Place a White flat at center (3,3) — not edge so all 4 dirs available
+    board[3][3] = [[WHITE, FLAT]]
+    state["turn"] = WHITE
+    state["turn_number"] = 3
+
+    moves = logic.get_legal_moves(state, WHITE)
+    move_actions = [m for m in moves if m["action"] == "move"
+                    and m["row"] == 3 and m["col"] == 3]
+    # With one piece, 4 directions, 1 drop each = 4 moves
+    assert len(move_actions) == 4
+    dirs = set(m["direction"] for m in move_actions)
+    assert dirs == {0, 1, 2, 3}  # north, south, east, west
+
+
+def test_tak_standing_stone_blocks_movement():
+    """§6.5: Standing stones block entry (except capstone flatten)."""
+    logic = TakLogic()
+    state = logic.create_initial_state()
+    board = state["board"]
+    board[2][2] = [[WHITE, FLAT]]
+    board[2][3] = [[BLACK, STANDING]]  # wall east of White
+    state["turn"] = WHITE
+    state["turn_number"] = 3
+
+    moves = logic.get_legal_moves(state, WHITE)
+    east_moves = [m for m in moves if m["action"] == "move"
+                  and m["row"] == 2 and m["col"] == 2 and m["direction"] == 2]
+    # Cannot move east — flat cannot enter standing stone
+    assert len(east_moves) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Runner
 # ═══════════════════════════════════════════════════════════════════════════
 

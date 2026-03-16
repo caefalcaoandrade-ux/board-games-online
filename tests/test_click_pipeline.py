@@ -53,7 +53,7 @@ def ensure_server():
     server = uvicorn.Server(config)
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
-    time.sleep(0.5)
+    time.sleep(0.3)
     _server_started = True
 
 
@@ -73,14 +73,14 @@ def setup_room(game_name):
     from client.network import NetworkClient
     c1 = NetworkClient(WS_URL)
     c1.connect()
-    time.sleep(0.3)
+    time.sleep(0.1)
     c1.create_room(game_name)
     poll_until(c1, "room_created")
     code = c1.room_code
 
     c2 = NetworkClient(WS_URL)
     c2.connect()
-    time.sleep(0.3)
+    time.sleep(0.1)
     c2.join_room(code)
 
     msgs1 = poll_until(c1, "game_started")
@@ -592,6 +592,7 @@ _DISPLAY_MODULES = {
     "Hive": "hive_display",
     "Hnefatafl": "hnefatafl_display",
     "Shobu": "shobu_display",
+    "Tak": "tak_display",
     "Tumbleweed": "tumbleweed_display",
     "YINSH": "yinsh_display",
 }

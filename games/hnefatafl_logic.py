@@ -574,26 +574,32 @@ class HnefataflLogic(AbstractBoardGame):
                     escape_routes += 1
                     guaranteed_escape = True
 
-        # Attacker pieces adjacent to king
+        # Pieces adjacent to king
         king_adj_attackers = 0
+        king_adj_defenders = 0
         for dr, dc in _DIRS:
             nr, nc = kr + dr, kc + dc
-            if _in_bounds(nr, nc) and board[nr][nc] == ATTACKER:
-                king_adj_attackers += 1
+            if _in_bounds(nr, nc):
+                adj = board[nr][nc]
+                if adj == ATTACKER:
+                    king_adj_attackers += 1
+                elif adj == DEFENDER:
+                    king_adj_defenders += 1
 
         # Defender-perspective score
         score = 0
-        score -= min_king_dist * 200      # closer to corner = better
+        score -= min_king_dist * 70       # closer to corner = better
         score += escape_routes * 100      # escape routes
         if guaranteed_escape:
             score += 1000                 # near-win
-        score += def_count * 20           # defender material
-        score -= king_adj_attackers * 200  # capture contact
-        if escape_routes == 0:
-            score -= 800                  # king bottled up
-        score -= atk_count * 15           # attacker material
+        score += def_count * 55           # defender material
+        score += king_adj_defenders * 100 # defenders protecting king
+        score -= king_adj_attackers * 200 # capture contact
+        if escape_routes == 0 and king_adj_attackers > 0:
+            score -= 300                  # king bottled by attackers
+        score -= atk_count * 8            # attacker material
 
-        x = max(-20.0, min(20.0, score / 2000.0))
+        x = max(-20.0, min(20.0, score / 2500.0))
         defender_val = 1.0 / (1.0 + math.exp(-x))
         if player == PLAYER_DEFENDER:
             return defender_val

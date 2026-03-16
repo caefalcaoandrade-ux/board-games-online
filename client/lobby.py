@@ -413,6 +413,7 @@ def _load_dispatch():
     from games.hive_display import run_online as hive_online
     from games.hnefatafl_display import run_online as hnefatafl_online
     from games.shobu_display import run_online as shobu_online
+    from games.tak_display import run_online as tak_online
     from games.tumbleweed_display import run_online as tumbleweed_online
     from games.yinsh_display import run_online as yinsh_online
     _ONLINE_DISPATCH["Abalone"] = abalone_online
@@ -426,6 +427,7 @@ def _load_dispatch():
     _ONLINE_DISPATCH["Hive"] = hive_online
     _ONLINE_DISPATCH["Hnefatafl"] = hnefatafl_online
     _ONLINE_DISPATCH["Shobu"] = shobu_online
+    _ONLINE_DISPATCH["Tak"] = tak_online
     _ONLINE_DISPATCH["Tumbleweed"] = tumbleweed_online
     _ONLINE_DISPATCH["YINSH"] = yinsh_online
 

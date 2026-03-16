@@ -173,7 +173,7 @@ def run_vs_bot(screen, game_name, difficulty):
     game_name : str
         Name of the game (must be in the registry).
     difficulty : str
-        "weak", "average", "strong", or "claude".
+        "weak", "strong", or "claude".
 
     Returns when the game ends or the user closes the window.
     """

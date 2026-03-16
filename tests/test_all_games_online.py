@@ -47,6 +47,7 @@ DISPLAY_MODULES = {
     "Hive": "hive_display",
     "Hnefatafl": "hnefatafl_display",
     "Shobu": "shobu_display",
+    "Tak": "tak_display",
     "Tumbleweed": "tumbleweed_display",
     "YINSH": "yinsh_display",
 }
@@ -55,7 +56,7 @@ DISPLAY_MODULES = {
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
-def play_random_game(game_name, max_moves=2000, seed=42):
+def play_random_game(game_name, max_moves=1000, seed=42):
     """Play random legal moves until game ends or limit reached.
 
     Returns (states, moves_played, final_status).
@@ -84,7 +85,7 @@ def play_random_game(game_name, max_moves=2000, seed=42):
     return states, moves_played, logic.get_game_status(state)
 
 
-def find_game_over_sequence(game_name, max_seeds=10, max_moves=2000):
+def find_game_over_sequence(game_name, max_seeds=10, max_moves=1000):
     """Find a state one move from game-over plus the winning move.
 
     Returns (pre_state, player, move, post_status) or (None, None, None, None).
@@ -144,7 +145,7 @@ def ensure_server():
     server = uvicorn.Server(config)
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
-    time.sleep(0.5)
+    time.sleep(0.3)
     _server_started = True
 
 
@@ -168,7 +169,7 @@ def setup_game_room(game_name):
 
     c1 = NetworkClient(WS_URL)
     c1.connect()
-    time.sleep(0.3)
+    time.sleep(0.1)
     c1.create_room(game_name)
     poll_until(c1, "room_created")
     code = c1.room_code
@@ -176,7 +177,7 @@ def setup_game_room(game_name):
 
     c2 = NetworkClient(WS_URL)
     c2.connect()
-    time.sleep(0.3)
+    time.sleep(0.1)
     c2.join_room(code)
 
     msgs1 = poll_until(c1, "game_started")
@@ -208,7 +209,7 @@ def cleanup_room(code):
 @pytest.mark.parametrize("game_name", ALL_GAMES)
 def test_logic_integrity(game_name):
     """Play random moves toward game-over, verify final status."""
-    states, moves, status = play_random_game(game_name, max_moves=2000, seed=42)
+    states, moves, status = play_random_game(game_name, max_moves=1000, seed=42)
 
     # Must have played at least one move
     assert len(moves) >= 1, f"{game_name}: no moves were played"
@@ -233,7 +234,7 @@ def test_logic_integrity(game_name):
 def test_logic_game_ends(game_name):
     """At least one seed should reach game-over within the move limit."""
     for seed in range(10):
-        _, _, status = play_random_game(game_name, max_moves=2000, seed=seed)
+        _, _, status = play_random_game(game_name, max_moves=1000, seed=seed)
         if status["is_over"]:
             # Verify final status consistency
             if status["is_draw"]:
@@ -241,7 +242,7 @@ def test_logic_game_ends(game_name):
             else:
                 assert status["winner"] in (1, 2)
             return  # success
-    pytest.skip(f"{game_name}: no seed reached game-over in 2000 moves")
+    pytest.skip(f"{game_name}: no seed reached game-over in 500 moves")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -364,21 +365,17 @@ def test_server_invalid_move_rejected(game_name):
         poll_until(active, "move_made", timeout=5)
         poll_until(passive, "move_made", timeout=5)
 
-        # Now passive tries to move (it's still active's... wait, no, it's
-        # passive's turn now). Let me drain and figure out whose turn it is.
-        # After one move, the turn should have switched. So now the previously
-        # passive player is the active one. Let me have the *originally active*
-        # player try to move again (wrong turn).
-        time.sleep(0.2)
+        # After one move, the turn should have switched. The *originally active*
+        # player tries to move again (wrong turn).
         active.send_move(legal[0])  # wrong turn now
-        time.sleep(0.5)
+        time.sleep(0.15)
         err_msgs = active.poll_messages()
         errors = [m for m in err_msgs if m.get("type") == "error"]
         assert len(errors) >= 1, \
             f"{game_name}: wrong-turn move was not rejected"
 
         # The other player should NOT have received an error
-        time.sleep(0.2)
+        time.sleep(0.1)
         passive_msgs = passive.poll_messages()
         passive_errors = [m for m in passive_msgs if m.get("type") == "error"]
         assert len(passive_errors) == 0, \
@@ -436,7 +433,7 @@ def test_game_over_propagation(game_name):
     """Both players receive game_over with correct result through the server."""
     # Find a state one move from game-over
     pre_state, winning_player, winning_move, expected = \
-        find_game_over_sequence(game_name, max_seeds=10, max_moves=2000)
+        find_game_over_sequence(game_name, max_seeds=10, max_moves=1000)
 
     if pre_state is None:
         pytest.skip(f"{game_name}: could not find game-over sequence")

@@ -280,6 +280,16 @@ def compute_push_info(boards, turn, b, fr, fc, d, dist):
     return None
 
 
+# ── Evaluation helpers ────────────────────────────────────────────────────────
+
+_SHOBU_PSQ = (
+    (0, 1, 1, 0),
+    (1, 3, 3, 1),
+    (1, 3, 3, 1),
+    (0, 1, 1, 0),
+)
+
+
 # ── Game class ───────────────────────────────────────────────────────────────
 
 class ShobuLogic(AbstractBoardGame):
@@ -432,89 +442,211 @@ class ShobuLogic(AbstractBoardGame):
     # ── Evaluation hook ────────────────────────────────────────────────
 
     def evaluate_position(self, state, player):
-        """Evaluate from *player*'s perspective using per-board stone analysis."""
+        """Evaluate from *player*'s perspective using per-board Shobu heuristics.
+
+        Features: race-to-zero with squared scaling (per-board stone counts,
+        non-linear danger curve), geometric push-off threats, home board
+        retention (1.5× multiplier), positional (piece-square table with
+        home multiplier, barrier pairs, edge vulnerability), phase-dependent
+        weighting, danger signals.
+        """
         boards = state["boards"]
         opp = WHITE if player == BLACK else BLACK
+        p_home = HOME[player]
 
-        # Per-board stone counts and positional features
-        own_stones = [0, 0, 0, 0]
-        opp_stones = [0, 0, 0, 0]
-        own_edge = 0
-        opp_edge = 0
-        own_center = 0
-        opp_center = 0
+        # ── Accumulators ────────────────────────────────────────────
+        p_cnt = [0, 0, 0, 0]
+        o_cnt = [0, 0, 0, 0]
+        p_pos = o_pos = 0.0
+        p_edge_brd = [0, 0, 0, 0]
+        o_edge_brd = [0, 0, 0, 0]
+        p_barriers = o_barriers = 0
 
         for b in range(4):
+            brd = boards[b]
+            is_ph = (b == p_home[0] or b == p_home[1])
+            hmul_p = 1.5 if is_ph else 1.0
+            hmul_o = 1.5 if not is_ph else 1.0
+
             for r in range(4):
+                row = brd[r]
                 for c in range(4):
-                    v = boards[b][r][c]
+                    v = row[c]
+                    if v == EMPTY:
+                        continue
+                    sv = _SHOBU_PSQ[r][c]
+                    on_edge = (r == 0 or r == 3 or c == 0 or c == 3)
+
                     if v == player:
-                        own_stones[b] += 1
-                        if r == 0 or r == 3 or c == 0 or c == 3:
-                            own_edge += 1
-                        if 1 <= r <= 2 and 1 <= c <= 2:
-                            own_center += 1
-                    elif v == opp:
-                        opp_stones[b] += 1
-                        if r == 0 or r == 3 or c == 0 or c == 3:
-                            opp_edge += 1
-                        if 1 <= r <= 2 and 1 <= c <= 2:
-                            opp_center += 1
+                        p_cnt[b] += 1
+                        p_pos += sv * hmul_p
+                        if on_edge:
+                            p_edge_brd[b] += 1
+                        if c < 3 and row[c + 1] == player:
+                            p_barriers += 1
+                        if r < 3 and brd[r + 1][c] == player:
+                            p_barriers += 1
+                    else:
+                        o_cnt[b] += 1
+                        o_pos += sv * hmul_o
+                        if on_edge:
+                            o_edge_brd[b] += 1
+                        if c < 3 and row[c + 1] == opp:
+                            o_barriers += 1
+                        if r < 3 and brd[r + 1][c] == opp:
+                            o_barriers += 1
 
-        min_own = min(own_stones)
-        min_opp = min(opp_stones)
-
-        if min_opp == 0:
+        # ── Terminal ────────────────────────────────────────────────
+        min_p = min(p_cnt[0], p_cnt[1], p_cnt[2], p_cnt[3])
+        min_o = min(o_cnt[0], o_cnt[1], o_cnt[2], o_cnt[3])
+        if min_o == 0:
             return 1.0
-        if min_own == 0:
+        if min_p == 0:
             return 0.0
 
-        # Dominant: min opponent stones per board
-        score = 5000 * (4 - min_opp)
+        # ── Push-off threat scan (geometric, no passive validation) ─
+        p_pushoffs = o_pushoffs = 0
+        for b in range(4):
+            brd = boards[b]
+            for r in range(4):
+                row = brd[r]
+                for c in range(4):
+                    v = row[c]
+                    if v == EMPTY:
+                        continue
+                    target = opp if v == player else player
+                    for d in DIRS:
+                        dr, dc = d[0], d[1]
+                        for dist in (1, 2):
+                            tr = r + dr * dist
+                            tc = c + dc * dist
+                            if not (0 <= tr < 4 and 0 <= tc < 4):
+                                continue
+                            # Push destination must be off grid
+                            if 0 <= tr + dr < 4 and 0 <= tc + dc < 4:
+                                continue
+                            # Check path: exactly 1 target, no own-color
+                            ok = True
+                            hits = 0
+                            for s in range(1, dist + 1):
+                                mv = brd[r + dr * s][c + dc * s]
+                                if mv == v:
+                                    ok = False
+                                    break
+                                if mv == target:
+                                    hits += 1
+                            if ok and hits == 1:
+                                if v == player:
+                                    p_pushoffs += 1
+                                else:
+                                    o_pushoffs += 1
 
-        # Own critical board defense
-        score -= 4000 * (4 - min_own)
+        # ── Phase detection ─────────────────────────────────────────
+        total = (p_cnt[0] + p_cnt[1] + p_cnt[2] + p_cnt[3]
+                 + o_cnt[0] + o_cnt[1] + o_cnt[2] + o_cnt[3])
+        removed = 32 - total
+        D = min(min_o, min_p)
 
-        # Edge vulnerability (differential)
-        score += (opp_edge - own_edge) * 300
+        if D >= 3 and removed <= 4:
+            phase = 0  # opening
+        elif D <= 1:
+            phase = 2  # endgame
+        else:
+            phase = 1  # midgame
 
-        # Center control (differential)
-        score += (own_center - opp_center) * 100
+        # ── Tier 2: Race-to-zero (squared scaling) ──────────────────
+        attack = ((4 - o_cnt[0]) ** 2 + (4 - o_cnt[1]) ** 2
+                  + (4 - o_cnt[2]) ** 2 + (4 - o_cnt[3]) ** 2)
+        defense = ((4 - p_cnt[0]) ** 2 + (4 - p_cnt[1]) ** 2
+                   + (4 - p_cnt[2]) ** 2 + (4 - p_cnt[3]) ** 2)
+        race = attack - defense
 
-        # Tactical flexibility: count direction+distance vectors with
-        # both a valid passive AND aggressive move
-        for side, sign in ((player, 1), (opp, -1)):
-            home = HOME[side]
-            # passive availability per board type, aggr availability per board type
-            p_avail = [[False] * 16, [False] * 16]  # [dark, light]
-            a_avail = [[False] * 16, [False] * 16]
-            for b in range(4):
-                bt = BOARD_TYPE[b]
-                is_home = b in home
-                for r in range(4):
-                    for c in range(4):
-                        if boards[b][r][c] != side:
-                            continue
-                        for di in range(8):
-                            d = DIRS[di]
-                            for dx, dist in enumerate((1, 2)):
-                                vi = di * 2 + dx
-                                if is_home and not p_avail[bt][vi]:
-                                    tr = r + d[0] * dist
-                                    tc = c + d[1] * dist
-                                    if on_grid(tr, tc) and \
-                                       _path_clear_passive(boards, b, r, c, d, dist):
-                                        p_avail[bt][vi] = True
-                                if not a_avail[bt][vi]:
-                                    if _aggr_legal(boards, side, b, r, c, d, dist):
-                                        a_avail[bt][vi] = True
-            flex = 0
-            for vi in range(16):
-                if (p_avail[DARK_T][vi] and a_avail[LITE_T][vi]) or \
-                   (p_avail[LITE_T][vi] and a_avail[DARK_T][vi]):
-                    flex += 1
-            score += sign * flex * 200
+        # Extra emphasis on weakest board
+        weak_bonus = (4 - min_o) ** 2 - (4 - min_p) ** 2
 
+        # Multi-board pressure: ≥2 boards with ≤2 opponent stones
+        low_opp = (int(o_cnt[0] <= 2) + int(o_cnt[1] <= 2)
+                   + int(o_cnt[2] <= 2) + int(o_cnt[3] <= 2))
+        low_own = (int(p_cnt[0] <= 2) + int(p_cnt[1] <= 2)
+                   + int(p_cnt[2] <= 2) + int(p_cnt[3] <= 2))
+        multi = 0
+        if low_opp >= 2:
+            multi += 400
+        if low_own >= 2:
+            multi -= 400
+
+        # ── Tier 3: Push-off threats ────────────────────────────────
+        threat_diff = p_pushoffs - o_pushoffs
+
+        # ── Tier 4: Home board retention ────────────────────────────
+        home_score = 0.0
+        for hb in p_home:
+            hs = p_cnt[hb]
+            if hs <= 1:
+                home_score -= 500
+            elif hs <= 2:
+                home_score -= 200
+        o_home = HOME[opp]
+        for hb in o_home:
+            hs = o_cnt[hb]
+            if hs <= 1:
+                home_score += 500
+            elif hs <= 2:
+                home_score += 200
+
+        # ── Tier 5: Positional ──────────────────────────────────────
+        pos_diff = p_pos - o_pos
+
+        # Edge vulnerability: 3+ edge stones on a single board
+        edge_vuln = 0
+        for b in range(4):
+            if p_edge_brd[b] > 2:
+                edge_vuln -= (p_edge_brd[b] - 2) * 50
+            if o_edge_brd[b] > 2:
+                edge_vuln += (o_edge_brd[b] - 2) * 50
+
+        barrier_diff = p_barriers - o_barriers
+
+        # ── Danger signals ──────────────────────────────────────────
+        danger = 0.0
+        for b in range(4):
+            if p_cnt[b] == 1:
+                danger -= 300
+            if o_cnt[b] == 1:
+                danger += 300
+            bd = o_cnt[b] - p_cnt[b]
+            if bd >= 2:
+                danger -= bd * 80
+            elif bd <= -2:
+                danger += (-bd) * 80
+
+        # ── Phase-weighted combination ──────────────────────────────
+        if phase == 0:  # opening
+            score = (race * 800 + weak_bonus * 600 + multi
+                     + threat_diff * 150
+                     + home_score
+                     + pos_diff * 45
+                     + edge_vuln * 1.3
+                     + barrier_diff * 39
+                     + danger)
+        elif phase == 1:  # midgame
+            score = (race * 2000 + weak_bonus * 1500 + multi * 1.5
+                     + threat_diff * 400
+                     + home_score * 2.0
+                     + pos_diff * 21
+                     + edge_vuln
+                     + barrier_diff * 30
+                     + danger)
+        else:  # endgame
+            score = (race * 3000 + weak_bonus * 2500 + multi * 2.0
+                     + threat_diff * 600
+                     + home_score * 1.5
+                     + pos_diff * 3
+                     + edge_vuln * 0.5
+                     + barrier_diff * 15
+                     + danger * 2.0)
+
+        # ── Sigmoid normalization ───────────────────────────────────
         x = max(-20.0, min(20.0, score / 3000.0))
         return 1.0 / (1.0 + math.exp(-x))
 
